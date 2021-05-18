@@ -37,33 +37,6 @@ pub const SLOTS_PER_YEAR: u64 =
     DEFAULT_TICKS_PER_SECOND / DEFAULT_TICKS_PER_SLOT * SECONDS_PER_DAY * 365;
 
 // Helpers
-fn pack_coption_key(src: &COption<Pubkey>, dst: &mut [u8; 4 + PUBKEY_BYTES]) {
-    #[allow(clippy::ptr_offset_with_cast)]
-    let (tag, body) = mut_array_refs![dst, 4, PUBKEY_BYTES];
-    match src {
-        COption::Some(key) => {
-            *tag = [1, 0, 0, 0];
-            body.copy_from_slice(key.as_ref());
-        }
-        COption::None => {
-            *tag = [0; 4];
-        }
-    }
-}
-
-fn unpack_coption_key(src: &[u8; 4 + PUBKEY_BYTES]) -> Result<COption<Pubkey>, ProgramError> {
-    #[allow(clippy::ptr_offset_with_cast)]
-    let (tag, body) = array_refs![src, 4, PUBKEY_BYTES];
-    match *tag {
-        [0, 0, 0, 0] => Ok(COption::None),
-        [1, 0, 0, 0] => Ok(COption::Some(Pubkey::new_from_array(*body))),
-        _ => {
-            msg!("COption<Pubkey> cannot be unpacked");
-            Err(ProgramError::InvalidAccountData)
-        }
-    }
-}
-
 fn pack_decimal(decimal: Decimal, dst: &mut [u8; 16]) {
     *dst = decimal
         .to_scaled_val()

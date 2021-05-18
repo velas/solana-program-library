@@ -19,7 +19,7 @@ use spl_token_lending::{
 use std::u64;
 
 #[tokio::test]
-async fn test_withdraw_base_currency_fixed_amount() {
+async fn test_withdraw_fixed_amount() {
     let mut test = ProgramTest::new(
         "spl_token_lending",
         spl_token_lending::id(),
@@ -142,7 +142,7 @@ async fn test_withdraw_base_currency_fixed_amount() {
 }
 
 #[tokio::test]
-async fn test_withdraw_quote_currency_all() {
+async fn test_withdraw_all() {
     let mut test = ProgramTest::new(
         "spl_token_lending",
         spl_token_lending::id(),
@@ -159,6 +159,7 @@ async fn test_withdraw_quote_currency_all() {
 
     let user_accounts_owner = Keypair::new();
     let usdc_mint = add_usdc_mint(&mut test);
+    // @FIXME
     let lending_market = add_lending_market(&mut test, usdc_mint.pubkey);
 
     let mut reserve_config = TEST_RESERVE_CONFIG;

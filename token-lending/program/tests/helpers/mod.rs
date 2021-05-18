@@ -64,9 +64,9 @@ pub const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 pub const SRM_MINT: &str = "SRMuApVNdxXokk5GT7XD5cUUgXMBCoAz2LHeuAoKWRt";
 
 #[allow(non_camel_case_types)]
-pub enum TestAggregatorPair {
-    SRM_USDC,
-    SOL_USDC,
+pub enum TestOraclePair {
+    SOL_USD,
+    SRM_USD,
 }
 
 pub struct LendingTest {
@@ -86,8 +86,7 @@ pub fn setup_test() -> (ProgramTest, LendingTest) {
     let usdc_mint = add_usdc_mint(&mut test);
     let srm_mint = add_srm_mint(&mut test);
 
-    let sol_usdc_aggregator = add_aggregator(&mut test, TestAggregatorPair::SOL_USDC);
-    let srm_usdc_aggregator = add_aggregator(&mut test, TestAggregatorPair::SRM_USDC);
+    let sol_usdc_aggregator = add_aggregator(&mut test, TestOraclePair::SOL_USD);
 
     (
         test,
@@ -124,7 +123,7 @@ impl AddPacked for ProgramTest {
     }
 }
 
-pub fn add_lending_market(test: &mut ProgramTest, quote_token_mint: Pubkey) -> TestLendingMarket {
+pub fn add_lending_market(test: &mut ProgramTest, quote_currency: [u8; 32]) -> TestLendingMarket {
     let lending_market_pubkey = Pubkey::new_unique();
     let (lending_market_authority, bump_seed) =
         Pubkey::find_program_address(&[lending_market_pubkey.as_ref()], &spl_token_lending::id());
@@ -138,7 +137,7 @@ pub fn add_lending_market(test: &mut ProgramTest, quote_token_mint: Pubkey) -> T
         &LendingMarket::new(InitLendingMarketParams {
             bump_seed,
             owner: lending_market_owner.pubkey(),
-            quote_token_mint,
+            quote_currency,
             token_program_id: spl_token::id(),
         }),
         &spl_token_lending::id(),
@@ -148,7 +147,7 @@ pub fn add_lending_market(test: &mut ProgramTest, quote_token_mint: Pubkey) -> T
         pubkey: lending_market_pubkey,
         owner: lending_market_owner,
         authority: lending_market_authority,
-        quote_token_mint,
+        quote_currency,
     }
 }
 
@@ -256,7 +255,7 @@ pub struct AddReserveArgs {
     pub collateral_amount: u64,
     pub mark_fresh: bool,
     pub slots_elapsed: u64,
-    pub aggregator_pair: Option<TestAggregatorPair>,
+    pub aggregator_pair: Option<TestOraclePair>,
 }
 
 pub fn add_reserve(
@@ -280,13 +279,14 @@ pub fn add_reserve(
         aggregator_pair,
     } = args;
 
+    // @FIXME
     let (liquidity_oracle_pubkey, market_price) = if let Some(aggregator_pair) = aggregator_pair {
         let aggregator = add_aggregator(test, aggregator_pair);
         (Some(aggregator.pubkey), aggregator.price)
     } else if liquidity_mint_pubkey == spl_token::native_mint::id() {
-        let aggregator = add_aggregator(test, TestAggregatorPair::SOL_USDC);
+        let aggregator = add_aggregator(test, TestOraclePair::SOL_USD);
         (Some(aggregator.pubkey), aggregator.price)
-    } else if liquidity_mint_pubkey == lending_market.quote_token_mint {
+    } else if liquidity_mint_pubkey == lending_market.quote_currency {
         (None, 1 * FRACTIONAL_TO_USDC)
     } else {
         panic!("aggregator pair is required");
@@ -495,7 +495,7 @@ pub struct TestLendingMarket {
     pub pubkey: Pubkey,
     pub owner: Keypair,
     pub authority: Pubkey,
-    pub quote_token_mint: Pubkey,
+    pub quote_currency: [u8; 32],
 }
 
 pub struct BorrowArgs<'a> {
@@ -516,7 +516,7 @@ pub struct LiquidateArgs<'a> {
 impl TestLendingMarket {
     pub async fn init(
         banks_client: &mut BanksClient,
-        quote_token_mint: Pubkey,
+        quote_currency: [u8; 32],
         payer: &Keypair,
     ) -> Self {
         let lending_market_owner =
@@ -542,7 +542,7 @@ impl TestLendingMarket {
                     spl_token_lending::id(),
                     lending_market_pubkey,
                     lending_market_owner.pubkey(),
-                    quote_token_mint,
+                    quote_currency,
                 ),
             ],
             Some(&payer.pubkey()),
@@ -556,7 +556,7 @@ impl TestLendingMarket {
             owner: lending_market_owner,
             pubkey: lending_market_pubkey,
             authority: lending_market_authority,
-            quote_token_mint,
+            quote_currency,
         }
     }
 
@@ -724,7 +724,7 @@ impl TestLendingMarket {
         let lending_market = self.get_state(banks_client).await;
         assert_eq!(lending_market.version, PROGRAM_VERSION);
         assert_eq!(lending_market.owner, self.owner.pubkey());
-        assert_eq!(lending_market.quote_token_mint, self.quote_token_mint);
+        assert_eq!(lending_market.quote_currency, self.quote_currency);
     }
 
     pub async fn add_to_genesis(
@@ -750,7 +750,8 @@ pub struct TestReserve {
     pub liquidity_supply_pubkey: Pubkey,
     pub liquidity_fee_receiver_pubkey: Pubkey,
     pub liquidity_host_pubkey: Pubkey,
-    pub liquidity_oracle_pubkey: Option<Pubkey>,
+    pub liquidity_oracle_pubkey: Pubkey,
+    pub liquidity_price_pubkey: Pubkey,
     pub collateral_mint_pubkey: Pubkey,
     pub collateral_supply_pubkey: Pubkey,
     pub user_liquidity_pubkey: Pubkey,
@@ -770,7 +771,8 @@ impl TestReserve {
         user_liquidity_pubkey: Pubkey,
         payer: &Keypair,
         user_accounts_owner: &Keypair,
-        aggregator: Option<&TestAggregator>,
+        liquidity_oracle_pubkey: Pubkey,
+        liquidity_price_pubkey: Pubkey,
     ) -> Result<Self, TransactionError> {
         let reserve_keypair = Keypair::new();
         let reserve_pubkey = reserve_keypair.pubkey();
@@ -782,13 +784,8 @@ impl TestReserve {
         let user_collateral_token_keypair = Keypair::new();
         let user_transfer_authority_keypair = Keypair::new();
 
-        let (liquidity_oracle_pubkey, market_price) = if let Some(aggregator) = aggregator {
-            (Some(aggregator.pubkey), aggregator.price)
-        } else if liquidity_mint_pubkey == lending_market.quote_token_mint {
-            (None, 1 * FRACTIONAL_TO_USDC)
-        } else {
-            panic!("aggregator is required");
-        };
+        // @FIXME: get Pyth price
+        let market_price= 1 * FRACTIONAL_TO_USDC;
 
         let liquidity_mint_account = banks_client
             .get_account(liquidity_mint_pubkey)
@@ -868,13 +865,13 @@ impl TestReserve {
                     liquidity_mint_pubkey,
                     liquidity_supply_keypair.pubkey(),
                     liquidity_fee_receiver_keypair.pubkey(),
+                    liquidity_oracle_pubkey,
+                    liquidity_price_pubkey,
                     collateral_mint_keypair.pubkey(),
                     collateral_supply_keypair.pubkey(),
-                    lending_market.quote_token_mint,
                     lending_market.pubkey,
                     lending_market.owner.pubkey(),
                     user_transfer_authority_keypair.pubkey(),
-                    liquidity_oracle_pubkey,
                 ),
             ],
             Some(&payer.pubkey()),
@@ -1210,18 +1207,18 @@ pub fn add_srm_mint(test: &mut ProgramTest) -> TestQuoteMint {
     }
 }
 
+// @FIXME
 pub struct TestAggregator {
     pub name: String,
     pub pubkey: Pubkey,
     pub price: u64,
 }
 
-pub fn add_aggregator(test: &mut ProgramTest, pair: TestAggregatorPair) -> TestAggregator {
+// @FIXME
+pub fn add_aggregator(test: &mut ProgramTest, pair: TestOraclePair) -> TestAggregator {
     let (name, decimals, price) = match pair {
         // price @ 1 SOL = 20 USDC
-        TestAggregatorPair::SOL_USDC => ("SOL:USDC", 6, 20 * FRACTIONAL_TO_USDC),
-        // price @ 1 SRM = 5 USDC
-        TestAggregatorPair::SRM_USDC => ("SRM:USDC", 6, 5 * FRACTIONAL_TO_USDC),
+        TestOraclePair::SOL_USD => ("SOL/USD", 6, 20 * FRACTIONAL_TO_USDC),
     };
 
     let pubkey = Pubkey::new_unique();
@@ -1261,6 +1258,7 @@ pub fn add_aggregator(test: &mut ProgramTest, pair: TestAggregatorPair) -> TestA
     }
 }
 
+// @FIXME
 impl TestAggregator {
     pub async fn add_to_genesis(
         &self,

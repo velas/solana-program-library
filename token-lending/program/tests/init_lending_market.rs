@@ -28,13 +28,15 @@ async fn test_success() {
     let usdc_mint = add_usdc_mint(&mut test);
     let (mut banks_client, payer, _recent_blockhash) = test.start().await;
 
+    // @FIXME: quote currency
     let test_lending_market =
         TestLendingMarket::init(&mut banks_client, usdc_mint.pubkey, &payer).await;
 
     test_lending_market.validate_state(&mut banks_client).await;
 
     let lending_market = test_lending_market.get_state(&mut banks_client).await;
-    assert_eq!(lending_market.quote_token_mint, usdc_mint.pubkey);
+    // @FIXME: quote currency
+    assert_eq!(lending_market.quote_currency, usdc_mint.pubkey);
 }
 
 #[tokio::test]

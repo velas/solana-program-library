@@ -10,7 +10,6 @@ use crate::{
         ReserveCollateral, ReserveConfig, ReserveLiquidity,
     },
 };
-use flux_aggregator::{borsh_state::InitBorshState, read_median, state::Aggregator};
 use num_traits::FromPrimitive;
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
@@ -101,11 +100,11 @@ pub fn process_instruction(
 fn process_init_lending_market(
     program_id: &Pubkey,
     owner: Pubkey,
+    quote_currency: [u8; 32],
     accounts: &[AccountInfo],
 ) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
     let lending_market_info = next_account_info(account_info_iter)?;
-    let quote_token_mint_info = next_account_info(account_info_iter)?;
     let rent = &Rent::from_account_info(next_account_info(account_info_iter)?)?;
     let token_program_id = next_account_info(account_info_iter)?;
 
@@ -116,17 +115,11 @@ fn process_init_lending_market(
         return Err(LendingError::InvalidAccountOwner.into());
     }
 
-    unpack_mint(&quote_token_mint_info.data.borrow())?;
-    if quote_token_mint_info.owner != token_program_id.key {
-        msg!("Quote token mint provided is not owned by the token program provided");
-        return Err(LendingError::InvalidTokenOwner.into());
-    }
-
     lending_market.init(InitLendingMarketParams {
         bump_seed: Pubkey::find_program_address(&[lending_market_info.key.as_ref()], program_id).1,
-        token_program_id: *token_program_id.key,
-        quote_token_mint: *quote_token_mint_info.key,
         owner,
+        quote_currency,
+        token_program_id: *token_program_id.key,
     });
     LendingMarket::pack(lending_market, &mut lending_market_info.data.borrow_mut())?;
 
@@ -161,6 +154,18 @@ fn process_set_lending_market_owner(
     LendingMarket::pack(lending_market, &mut lending_market_info.data.borrow_mut())?;
 
     Ok(())
+}
+
+fn get_attr_str<'a, T>(ite: &mut T) -> String
+    where T: Iterator<Item=&'a u8>
+{
+    let mut len = *ite.next().unwrap() as usize;
+    let mut val = String::with_capacity(len);
+    while len > 0 {
+        val.push(*ite.next().unwrap() as char);
+        len -= 1;
+    }
+    return val
 }
 
 fn process_init_reserve(
@@ -215,9 +220,10 @@ fn process_init_reserve(
     let reserve_liquidity_mint_info = next_account_info(account_info_iter)?;
     let reserve_liquidity_supply_info = next_account_info(account_info_iter)?;
     let reserve_liquidity_fee_receiver_info = next_account_info(account_info_iter)?;
+    let reserve_liquidity_oracle_info = next_account_info(account_info_iter)?;
+    let reserve_liquidity_price_info = next_account_info(account_info_iter)?;
     let reserve_collateral_mint_info = next_account_info(account_info_iter)?;
     let reserve_collateral_supply_info = next_account_info(account_info_iter)?;
-    let quote_token_mint_info = next_account_info(account_info_iter)?;
     let lending_market_info = next_account_info(account_info_iter)?;
     let lending_market_authority_info = next_account_info(account_info_iter)?;
     let lending_market_owner_info = next_account_info(account_info_iter)?;
@@ -239,12 +245,6 @@ fn process_init_reserve(
         return Err(LendingError::InvalidAccountInput.into());
     }
 
-    let quote_token_mint = unpack_mint(&quote_token_mint_info.data.borrow())?;
-    if quote_token_mint_info.owner != token_program_id.key {
-        msg!("Quote token mint provided is not owned by the token program provided");
-        return Err(LendingError::InvalidTokenOwner.into());
-    }
-
     let lending_market = LendingMarket::unpack(&lending_market_info.data.borrow())?;
     if lending_market_info.owner != program_id {
         msg!("Lending market provided is not owned by the lending program");
@@ -262,38 +262,75 @@ fn process_init_reserve(
         msg!("Lending market owner provided must be a signer");
         return Err(LendingError::InvalidSigner.into());
     }
-    if &lending_market.quote_token_mint != quote_token_mint_info.key {
-        msg!("Lending market quote token mint does not match the quote token mint provided");
-        return Err(LendingError::InvalidAccountInput.into());
+
+    let pyth_product_data = &reserve_liquidity_oracle_info.try_borrow_data()?;
+    let pyth_product = pyth_client::cast::<pyth_client::Product>(pyth_product_data);
+    if pyth_product.magic != pyth_client::MAGIC {
+        // @TODO: error messages
+        msg!("not a valid pyth account");
+        return Err(LendingError::InvalidOracleConfig.into());
+    }
+    if pyth_product.atype != pyth_client::AccountType::Product as u32 {
+        // @TODO: error messages
+        msg!("not a valid pyth product account");
+        return Err(LendingError::InvalidOracleConfig.into());
+    }
+    if pyth_product.ver != pyth_client::VERSION_1 {
+        // @TODO: error messages
+        msg!("unexpected pyth product account version");
+        return Err(LendingError::InvalidOracleConfig.into());
     }
 
-    let (reserve_liquidity_oracle_pubkey, reserve_liquidity_market_price) = if &lending_market
-        .quote_token_mint
-        == reserve_liquidity_mint_info.key
-    {
-        if account_info_iter.peek().is_some() {
-            msg!("Reserve liquidity oracle cannot be provided when reserve liquidity is the quote currency");
-            return Err(LendingError::InvalidAccountInput.into());
-        }
-        // 1 because quote token price is equal to itself
-        (COption::None, 1)
-    } else {
-        let reserve_liquidity_oracle_info = next_account_info(account_info_iter)?;
-        assert_rent_exempt(rent, reserve_liquidity_oracle_info)?;
+    let mut quote_currency;
 
-        let aggregator = Aggregator::load_initialized(reserve_liquidity_oracle_info)?;
-        if aggregator.config.decimals != quote_token_mint.decimals {
-            msg!(
-                "Quote token mint decimals does not match the aggregator config decimals provided"
-            );
-            return Err(LendingError::InvalidOracleConfig.into());
-        }
+    let mut pyth_product_attribute_iter = pyth_product.attr[..].iter();
+    let mut pyth_product_size = pyth_product.size as usize - pyth_client::PROD_HDR_SIZE;
+    while pyth_product_size > 0 {
+        let key = get_attr_str( &mut pyth_product_attribute_iter);
+        let value = get_attr_str( &mut pyth_product_attribute_iter);
 
-        (
-            COption::Some(*reserve_liquidity_oracle_info.key),
-            read_median(reserve_liquidity_oracle_info)?.median,
-        )
-    };
+        if key == "quote_currency" {
+            quote_currency = [0u8; 32];
+            quote_currency[0..value.len()].clone_from_slice(value.as_bytes());
+            break;
+        }
+        pyth_product_size -= 2 + key.len() + value.len();
+    }
+
+    if quote_currency.is_empty() {
+        msg!("Oracle quote currency not found");
+        return Err(LendingError::InvalidOracleConfig.into());
+    }
+    if &lending_market.quote_currency != quote_currency {
+        msg!("Lending market quote currency does not match the oracle quote currency");
+        return Err(LendingError::InvalidOracleConfig.into());
+    }
+
+    if !pyth_product.px_acc.is_valid() {
+        msg!("Oracle product price is invalid");
+        return Err(LendingError::InvalidOracleConfig.into());
+    }
+    let pyth_price_pubkey = Pubkey::new(&pyth_product.px_acc.val);
+    if &pyth_price_pubkey != reserve_liquidity_price_info.key {
+        msg!("Oracle product price does not match the reserve liquidity price provided");
+        return Err(LendingError::InvalidOracleConfig.into());
+    }
+
+    let pyth_price_data = &reserve_liquidity_price_info.try_borrow_data()?;
+    let pyth_price = pyth_client::cast::<pyth_client::Price>(pyth_price_data);
+    if pyth_price.ptype != pyth_client::PriceType::Price {
+        msg!("Oracle price type is invalid");
+        return Err(LendingError::InvalidOracleConfig.into());
+    }
+    if pyth_price.valid_slot < clock.slot {
+        msg!("Oracle price is stale");
+        return Err(LendingError::InvalidOracleConfig.into());
+    }
+
+    let price = pyth_price.agg.price;
+    let exponent = pyth_price.expo;
+    // @FIXME: math
+    let market_price: u64 = price * (10 ** exponent) * (10 ** 6);
 
     let authority_signer_seeds = &[
         lending_market_info.key.as_ref(),
@@ -322,8 +359,9 @@ fn process_init_reserve(
             mint_decimals: reserve_liquidity_mint.decimals,
             supply_pubkey: *reserve_liquidity_supply_info.key,
             fee_receiver: *reserve_liquidity_fee_receiver_info.key,
-            oracle_pubkey: reserve_liquidity_oracle_pubkey,
-            market_price: reserve_liquidity_market_price,
+            oracle_pubkey: *reserve_liquidity_oracle_info.key,
+            price_pubkey: *reserve_liquidity_price_info.key,
+            market_price,
         }),
         collateral: ReserveCollateral::new(NewReserveCollateralParams {
             mint_pubkey: *reserve_collateral_mint_info.key,
@@ -399,6 +437,8 @@ fn process_init_reserve(
 fn process_refresh_reserve(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
     let account_info_iter = &mut accounts.iter().peekable();
     let reserve_info = next_account_info(account_info_iter)?;
+    let reserve_liquidity_oracle_info = next_account_info(account_info_iter)?;
+    let reserve_liquidity_price_info = next_account_info(account_info_iter)?;
     let clock = &Clock::from_account_info(next_account_info(account_info_iter)?)?;
 
     let mut reserve = Reserve::unpack(&reserve_info.data.borrow())?;
@@ -406,20 +446,17 @@ fn process_refresh_reserve(program_id: &Pubkey, accounts: &[AccountInfo]) -> Pro
         msg!("Reserve provided is not owned by the lending program");
         return Err(LendingError::InvalidAccountOwner.into());
     }
-
-    if let COption::Some(reserve_liquidity_oracle_pubkey) = reserve.liquidity.oracle_pubkey {
-        let reserve_liquidity_oracle_info = next_account_info(account_info_iter)?;
-        if &reserve_liquidity_oracle_pubkey != reserve_liquidity_oracle_info.key {
-            msg!("Reserve liquidity oracle does not match the reserve liquidity oracle provided");
-            return Err(LendingError::InvalidAccountInput.into());
-        }
-
-        // @TODO: sanity check https://git.io/JOCcb
-        reserve.liquidity.market_price = read_median(reserve_liquidity_oracle_info)?.median;
-    } else if account_info_iter.peek().is_some() {
-        msg!("Reserve liquidity oracle cannot be provided when reserve liquidity is the quote currency");
+    if &reserve.liquidity.oracle_pubkey != reserve_liquidity_oracle_info.key {
+        msg!("Reserve liquidity oracle does not match the reserve liquidity oracle provided");
         return Err(LendingError::InvalidAccountInput.into());
     }
+    if &reserve.liquidity.price_pubkey != reserve_liquidity_price_info.key {
+        msg!("Reserve liquidity price does not match the reserve liquidity price provided");
+        return Err(LendingError::InvalidAccountInput.into());
+    }
+
+    // @FIXME: get Pyth price, simplify from init_reserve since price pubkey is trusted
+    reserve.liquidity.market_price = 0;
 
     reserve.accrue_interest(clock.slot)?;
     reserve.last_update.update_slot(clock.slot);

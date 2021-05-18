@@ -31,7 +31,7 @@ async fn test_success() {
     let user_accounts_owner = Keypair::new();
     let usdc_mint = add_usdc_mint(&mut test);
     let lending_market = add_lending_market(&mut test, usdc_mint.pubkey);
-    let sol_usdc_aggregator = add_aggregator(&mut test, TestAggregatorPair::SOL_USDC);
+    let sol_usdc_aggregator = add_aggregator(&mut test, TestOraclePair::SOL_USD);
 
     let (mut banks_client, payer, _recent_blockhash) = test.start().await;
 
@@ -117,13 +117,13 @@ async fn test_already_initialized() {
             usdc_test_reserve.liquidity_mint_pubkey,
             usdc_test_reserve.liquidity_supply_pubkey,
             usdc_test_reserve.liquidity_fee_receiver_pubkey,
+            usdc_test_reserve.liquidity_oracle_pubkey,
+            usdc_test_reserve.liquidity_price_pubkey,
             usdc_test_reserve.collateral_mint_pubkey,
             usdc_test_reserve.collateral_supply_pubkey,
-            lending_market.quote_token_mint,
             lending_market.pubkey,
             lending_market.owner.pubkey(),
             user_transfer_authority.pubkey(),
-            None,
         )],
         Some(&payer.pubkey()),
     );
@@ -155,7 +155,7 @@ async fn test_invalid_fees() {
     let user_accounts_owner = Keypair::new();
     let usdc_mint = add_usdc_mint(&mut test);
     let lending_market = add_lending_market(&mut test, usdc_mint.pubkey);
-    let sol_usdc_aggregator = add_aggregator(&mut test, TestAggregatorPair::SOL_USDC);
+    let sol_usdc_aggregator = add_aggregator(&mut test, TestOraclePair::SOL_USD);
 
     let (mut banks_client, payer, _recent_blockhash) = test.start().await;
 
