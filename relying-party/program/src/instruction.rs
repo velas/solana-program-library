@@ -1,0 +1,171 @@
+//! Program instructions
+
+use crate::id;
+use borsh::{BorshDeserialize, BorshSerialize, BorshSchema};
+use solana_program::{
+    instruction::{AccountMeta, Instruction},
+    pubkey::Pubkey,
+    sysvar::rent,
+};
+
+/// Instructions supported by the program
+#[derive(Clone, Debug, PartialEq, BorshDeserialize, BorshSerialize, BorshSchema)]
+pub enum RelyingPartyInstruction {
+    /// Create a new relying party account
+    /// RelyingPartyProgram contain meta inforamation about some dapp that needed for VaccountProgram. 
+    ///
+    /// Accounts expected by this instruction:
+    ///
+    /// 0. `[writable]` RelyingParty account, must be uninitialized
+    /// 1. `[signer]` RelyingParty authority
+    /// 2. `[]` Related program to the RelyingParty 
+    Initialize {
+        /// Dapp name to show in Vaccount
+        program_name: String,
+        /// Dapp icon content identifier
+        program_icon_cid: [u8; 64],
+        /// Domain name of the Dapp
+        program_domain_name: String,
+        /// Allowed redirect URI
+        program_redirect_uri: Vec<String>,
+        /// Nonce with RelyingParty address was genereted
+        bump_seed_nonce: u8
+    },
+
+    /// Update the authority of the provided RelyingParty account
+    ///
+    /// Accounts expected by this instruction:
+    ///
+    /// 0. `[writable]` RelyingParty account, must be previously initialized
+    /// 1. `[signer]` Current RelyingParty authority
+    /// 2. `[]` New RelyingParty authority
+    SetAuthority,
+
+    /// Close the provided RelyingParty account, draining lamports to recipient account
+    ///
+    /// Accounts expected by this instruction:
+    ///
+    /// 0. `[writable]` RelyingParty account, must be previously initialized
+    /// 1. `[signer]` RelyingParty authority
+    /// 2. `[]` Receiver of account lamports
+    CloseAccount,
+}
+
+/// Create a `RelyingPartyInstruction::Initialize` instruction
+pub fn initialize(
+    relying_party_account: &Pubkey, 
+    authority: &Pubkey, 
+    related_program: &Pubkey,
+    program_name: String,
+    program_icon_cid: [u8; 64],
+    program_domain_name: String,
+    program_redirect_uri: Vec<String>,
+    bump_seed_nonce: u8,
+) -> Instruction {
+    Instruction::new_with_borsh(
+        id(),
+        &RelyingPartyInstruction::Initialize{ 
+            program_name, 
+            program_icon_cid, 
+            program_domain_name, 
+            program_redirect_uri, 
+            bump_seed_nonce 
+        },
+        vec![
+            AccountMeta::new(*relying_party_account, false),
+            AccountMeta::new_readonly(*authority, true),
+            AccountMeta::new_readonly(*related_program, false),
+            AccountMeta::new_readonly(rent::id(), false),
+            AccountMeta::new_readonly(solana_program::system_program::id(), false),
+        ],
+    )
+}
+
+/// Create a `RelyingPartyInstruction::SetAuthority` instruction
+pub fn set_authority(
+    relying_party_account: &Pubkey,
+    signer: &Pubkey,
+    new_authority: &Pubkey,
+) -> Instruction {
+    Instruction::new_with_borsh(
+        id(),
+        &RelyingPartyInstruction::SetAuthority,
+        vec![
+            AccountMeta::new(*relying_party_account, false),
+            AccountMeta::new_readonly(*signer, true),
+            AccountMeta::new_readonly(*new_authority, false),
+        ],
+    )
+}
+
+/// Create a `RelyingPartyInstruction::CloseAccount` instruction
+pub fn close_account(relying_party_account: &Pubkey, signer: &Pubkey, receiver: &Pubkey) -> Instruction {
+    Instruction::new_with_borsh(
+        id(),
+        &RelyingPartyInstruction::CloseAccount,
+        vec![
+            AccountMeta::new(*relying_party_account, false),
+            AccountMeta::new_readonly(*signer, true),
+            AccountMeta::new(*receiver, false),
+        ],
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solana_program::program_error::ProgramError;
+    use std::convert::TryInto;
+
+    #[test]
+    fn serialize_initialize() {
+        let instruction = RelyingPartyInstruction::Initialize{ 
+            program_name: String::from("test_program"),
+            program_icon_cid: "d2a84f4b8b650937ec8f73cd8be2c74add5a911ba64df27458ed8229da804a26".as_bytes().try_into().unwrap(),
+            program_domain_name: String::from("http://localhost:8989/"),
+            program_redirect_uri: vec![
+                "https://velas.com/ru".to_string(),
+                "https://wallet.velas.com/".to_string(),
+            ],
+            bump_seed_nonce: 199,
+        };
+        let expected = vec![0, 12, 0, 0, 0, 116, 101, 115, 116, 95, 112, 114, 111, 103, 114, 97, 109, 100, 50, 97, 56, 52, 102, 52, 98, 56, 98, 54, 53, 48, 57, 51, 55, 101, 99, 56, 102, 55, 51, 99, 100, 56, 98, 101, 50, 99, 55, 52, 97, 100, 100, 53, 97, 57, 49, 49, 98, 97, 54, 52, 100, 102, 50, 55, 52, 53, 56, 101, 100, 56, 50, 50, 57, 100, 97, 56, 48, 52, 97, 50, 54, 22, 0, 0, 0, 104, 116, 116, 112, 58, 47, 47, 108, 111, 99, 97, 108, 104, 111, 115, 116, 58, 56, 57, 56, 57, 47, 2, 0, 0, 0, 20, 0, 0, 0, 104, 116, 116, 112, 115, 58, 47, 47, 118, 101, 108, 97, 115, 46, 99, 111, 109, 47, 114, 117, 25, 0, 0, 0, 104, 116, 116, 112, 115, 58, 47, 47, 119, 97, 108, 108, 101, 116, 46, 118, 101, 108, 97, 115, 46, 99, 111, 109, 47, 199];
+        assert_eq!(instruction.try_to_vec().unwrap(), expected);
+        assert_eq!(
+            RelyingPartyInstruction::try_from_slice(&expected).unwrap(),
+            instruction
+        );
+    }
+
+    #[test]
+    fn serialize_set_authority() {
+        let instruction = RelyingPartyInstruction::SetAuthority;
+        let expected = vec![1];
+        assert_eq!(instruction.try_to_vec().unwrap(), expected);
+        assert_eq!(
+            RelyingPartyInstruction::try_from_slice(&expected).unwrap(),
+            instruction
+        );
+    }
+
+    #[test]
+    fn serialize_close_account() {
+        let instruction = RelyingPartyInstruction::CloseAccount;
+        let expected = vec![2];
+        assert_eq!(instruction.try_to_vec().unwrap(), expected);
+        assert_eq!(
+            RelyingPartyInstruction::try_from_slice(&expected).unwrap(),
+            instruction
+        );
+    }
+
+    #[test]
+    fn deserialize_invalid_instruction() {
+        let mut expected = vec![12];
+        expected.append(&mut "TEST_DATA".try_to_vec().unwrap());
+        let err: ProgramError = RelyingPartyInstruction::try_from_slice(&expected)
+            .unwrap_err()
+            .into();
+        assert!(matches!(err, ProgramError::BorshIoError(_)));
+    }
+}

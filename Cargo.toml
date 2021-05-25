@@ -14,6 +14,7 @@ members = [
   "memo/program",
   "name-service/program",
   "record/program",
+  "relying-party/program",
   "shared-memory/program",
   "stake-pool/cli",
   "stake-pool/program",
