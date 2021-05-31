@@ -1,0 +1,29 @@
+[package]
+name = "vpl-relying-party-cli"
+version = "0.1.0"
+description = "VPL Relying Party Command-line Utility"
+authors = ["Vlad Pavlichek <vlader112@gmail.com>"]
+repository = "https://github.com/velas/velas-program-library"
+license = "Apache-2.0"
+edition = "2018"
+
+[dependencies]
+borsh = "0.8.1"
+borsh-derive = "0.8.1"
+chrono = "0.4.19"
+clap = "2.33.3"
+cid = "0.7.0"
+multihash = "0.10"
+solana-clap-utils = "1.6.7"
+solana-cli-config = "1.6.7"
+solana-client = "1.6.7"
+solana-logger = "1.6.7"
+solana-sdk = "1.6.7"
+vpl-relying-party = { version = "0.1.0", path = "../program", features = ["no-entrypoint"] }
+
+[[bin]]
+name = "vpl-relying-party"
+path = "src/main.rs"
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
