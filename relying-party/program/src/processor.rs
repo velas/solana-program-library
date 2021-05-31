@@ -22,6 +22,8 @@ use solana_program::{
         system_instruction,
 };
 use std::cmp::min;
+use cid::Cid;
+use std::convert::TryFrom;
 
 
 fn check_authority(authority_info: &AccountInfo, expected_authority: &Pubkey) -> ProgramResult {
@@ -48,15 +50,15 @@ fn get_redirect_uris_hash(program_redirect_uris: &Vec<String>,) -> Hash {
 fn check_relying_party_address(
     relying_party_address: &Pubkey, 
     program_name: &String, 
-    program_icon_cid: &[u8; 64], 
+    program_icon_cid: &String, 
     program_domain_name: &String, 
     program_redirect_uris: &Vec<String>,
     seed_nonce: &u8,
 ) -> ProgramResult {
     let relying_party_seed = [
-        &program_name.as_bytes()[..min(32, program_name.len() - 1)],
-        &program_icon_cid[..min(32, program_icon_cid.len() - 1)],
-        &program_domain_name.as_bytes()[..min(32, program_domain_name.len() - 1)],
+        &program_name.as_bytes()[..min(32, program_name.len())],
+        &program_icon_cid.as_bytes()[..min(32, program_icon_cid.len())],
+        &program_domain_name.as_bytes()[..min(32, program_domain_name.len())],
         &get_redirect_uris_hash(program_redirect_uris).to_bytes()[..32],
         &[*seed_nonce],
     ];
@@ -82,21 +84,21 @@ pub fn process_instruction(
         RelyingPartyInstruction::Initialize{ program_name, program_icon_cid, program_domain_name, program_redirect_uri, bump_seed_nonce } => {
             msg!("RelyingPartyInstruction::Initialize");
 
+            let icon_cid = Cid::try_from(program_icon_cid.clone());
+            if !icon_cid.is_ok() {
+                return Err(RelyingParty::InvalidIconCID.into())
+            }
+            let icon_cid = icon_cid.unwrap().to_bytes();
+        
             let relying_party_info = next_account_info(account_info_iter)?;
             let authority_info = next_account_info(account_info_iter)?;
-            let related_program_info = next_account_info(account_info_iter)?;
             // Rent sysvar account
             let rent_info = next_account_info(account_info_iter)?;
             let rent = &Rent::from_account_info(rent_info)?;
             // System program account
             let system_program_info = next_account_info(account_info_iter)?;
 
-            if !authority_info.is_signer {
-                msg!("RelyingParty authority signature missing");
-                return Err(ProgramError::MissingRequiredSignature);
-            }
-
-            if !related_program_info.data_is_empty() {
+            if !relying_party_info.data_is_empty() {
                 return Err(ProgramError::InvalidAccountData)
             }
 
@@ -112,10 +114,9 @@ pub fn process_instruction(
             let relying_party_account_data = RelyingPartyData {
                 version: RelyingPartyData::CURRENT_VERSION,
                 authority: *authority_info.key,
-                related_program: *related_program_info.key,
                 related_program_data: RelatedProgramInfo{
                     name: program_name.clone(),
-                    icon_cid: program_icon_cid,
+                    icon_cid: icon_cid,
                     domain_name: program_domain_name.clone(),
                     redirect_uri: program_redirect_uri.clone(),
                 },
@@ -124,13 +125,13 @@ pub fn process_instruction(
             // Fund the relying party with rent-exempt balance
             let required_relying_party_lamports = rent.minimum_balance(get_instance_packed_len(&relying_party_account_data).unwrap());
             if relying_party_info.lamports() < required_relying_party_lamports {
-                return Err(RelyingParty::AccountNotRentExempt.into());
+                return Err(ProgramError::AccountNotRentExempt);
             }
 
             let authority_relying_party_signature_seeds = [
-                &program_name.as_bytes()[..min(32, program_name.len() - 1)],
-                &program_icon_cid[..min(32, program_icon_cid.len() - 1)],
-                &program_domain_name.as_bytes()[..min(32, program_domain_name.len() - 1)],
+                &program_name.as_bytes()[..min(32, program_name.len())],
+                &program_icon_cid.as_bytes()[..min(32, program_icon_cid.len())],
+                &program_domain_name.as_bytes()[..min(32, program_domain_name.len())],
                 &get_redirect_uris_hash(&program_redirect_uri).to_bytes()[..32],
                 &[bump_seed_nonce],
             ];
@@ -194,11 +195,8 @@ pub fn process_instruction(
             check_authority(authority_info, &relying_party_data.authority)?;
 
             let relying_party_data_lamports = relying_party_info.lamports();
-            
             **relying_party_info.lamports.borrow_mut() = 0;
-            **destination_info.lamports.borrow_mut() = relying_party_data_lamports
-                .checked_add(relying_party_data_lamports)
-                .ok_or(RelyingParty::Overflow)?;
+            **destination_info.lamports.borrow_mut() += relying_party_data_lamports;
 
             Ok(())
         }

@@ -17,13 +17,13 @@ pub enum RelyingPartyInstruction {
     /// Accounts expected by this instruction:
     ///
     /// 0. `[writable]` RelyingParty account, must be uninitialized
-    /// 1. `[signer]` RelyingParty authority
-    /// 2. `[]` Related program to the RelyingParty 
+    /// 1. `[]` RelyingParty authority
+    /// 2. `[]` Related program to the RelyingParty
     Initialize {
         /// Dapp name to show in Vaccount
         program_name: String,
         /// Dapp icon content identifier
-        program_icon_cid: [u8; 64],
+        program_icon_cid: String,
         /// Domain name of the Dapp
         program_domain_name: String,
         /// Allowed redirect URI
@@ -55,9 +55,8 @@ pub enum RelyingPartyInstruction {
 pub fn initialize(
     relying_party_account: &Pubkey, 
     authority: &Pubkey, 
-    related_program: &Pubkey,
     program_name: String,
-    program_icon_cid: [u8; 64],
+    program_icon_cid: String,
     program_domain_name: String,
     program_redirect_uri: Vec<String>,
     bump_seed_nonce: u8,
@@ -73,8 +72,7 @@ pub fn initialize(
         },
         vec![
             AccountMeta::new(*relying_party_account, false),
-            AccountMeta::new_readonly(*authority, true),
-            AccountMeta::new_readonly(*related_program, false),
+            AccountMeta::new_readonly(*authority, false),
             AccountMeta::new_readonly(rent::id(), false),
             AccountMeta::new_readonly(solana_program::system_program::id(), false),
         ],
@@ -115,13 +113,12 @@ pub fn close_account(relying_party_account: &Pubkey, signer: &Pubkey, receiver: 
 mod tests {
     use super::*;
     use solana_program::program_error::ProgramError;
-    use std::convert::TryInto;
 
     #[test]
     fn serialize_initialize() {
         let instruction = RelyingPartyInstruction::Initialize{ 
             program_name: String::from("test_program"),
-            program_icon_cid: "d2a84f4b8b650937ec8f73cd8be2c74add5a911ba64df27458ed8229da804a26".as_bytes().try_into().unwrap(),
+            program_icon_cid: "QmdfTbBqBPQ7VNxZEYEj14VmRuZBkqFbiwReogJgS1zR1n".to_string(),
             program_domain_name: String::from("http://localhost:8989/"),
             program_redirect_uri: vec![
                 "https://velas.com/ru".to_string(),
@@ -129,7 +126,7 @@ mod tests {
             ],
             bump_seed_nonce: 199,
         };
-        let expected = vec![0, 12, 0, 0, 0, 116, 101, 115, 116, 95, 112, 114, 111, 103, 114, 97, 109, 100, 50, 97, 56, 52, 102, 52, 98, 56, 98, 54, 53, 48, 57, 51, 55, 101, 99, 56, 102, 55, 51, 99, 100, 56, 98, 101, 50, 99, 55, 52, 97, 100, 100, 53, 97, 57, 49, 49, 98, 97, 54, 52, 100, 102, 50, 55, 52, 53, 56, 101, 100, 56, 50, 50, 57, 100, 97, 56, 48, 52, 97, 50, 54, 22, 0, 0, 0, 104, 116, 116, 112, 58, 47, 47, 108, 111, 99, 97, 108, 104, 111, 115, 116, 58, 56, 57, 56, 57, 47, 2, 0, 0, 0, 20, 0, 0, 0, 104, 116, 116, 112, 115, 58, 47, 47, 118, 101, 108, 97, 115, 46, 99, 111, 109, 47, 114, 117, 25, 0, 0, 0, 104, 116, 116, 112, 115, 58, 47, 47, 119, 97, 108, 108, 101, 116, 46, 118, 101, 108, 97, 115, 46, 99, 111, 109, 47, 199];
+        let expected = vec![0, 12, 0, 0, 0, 116, 101, 115, 116, 95, 112, 114, 111, 103, 114, 97, 109, 46, 0, 0, 0, 81, 109, 100, 102, 84, 98, 66, 113, 66, 80, 81, 55, 86, 78, 120, 90, 69, 89, 69, 106, 49, 52, 86, 109, 82, 117, 90, 66, 107, 113, 70, 98, 105, 119, 82, 101, 111, 103, 74, 103, 83, 49, 122, 82, 49, 110, 22, 0, 0, 0, 104, 116, 116, 112, 58, 47, 47, 108, 111, 99, 97, 108, 104, 111, 115, 116, 58, 56, 57, 56, 57, 47, 2, 0, 0, 0, 20, 0, 0, 0, 104, 116, 116, 112, 115, 58, 47, 47, 118, 101, 108, 97, 115, 46, 99, 111, 109, 47, 114, 117, 25, 0, 0, 0, 104, 116, 116, 112, 115, 58, 47, 47, 119, 97, 108, 108, 101, 116, 46, 118, 101, 108, 97, 115, 46, 99, 111, 109, 47, 199];
         assert_eq!(instruction.try_to_vec().unwrap(), expected);
         assert_eq!(
             RelyingPartyInstruction::try_from_slice(&expected).unwrap(),

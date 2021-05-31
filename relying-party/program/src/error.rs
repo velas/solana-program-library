@@ -22,6 +22,10 @@ pub enum RelyingParty {
     /// Account is not rent-exempt
     #[error("AccountNotRentExempt")]
     AccountNotRentExempt,
+
+    /// Account icon CID invalid https://docs.ipfs.io/concepts/content-addressing/
+    #[error("InvalidIconCID")]
+    InvalidIconCID,
 }
 impl From<RelyingParty> for ProgramError {
     fn from(e: RelyingParty) -> Self {

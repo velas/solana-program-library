@@ -11,8 +11,6 @@ pub struct RelyingPartyData {
     pub version: u8,
     /// The account allowed to update the data
     pub authority: Pubkey,
-    /// The metadata of the corresponded program to be added
-    pub related_program: Pubkey,
     /// The metadata of the related program
     pub related_program_data: RelatedProgramInfo,
 }
@@ -23,7 +21,7 @@ pub struct RelatedProgramInfo {
     /// Name of the program to show in Vaccount
     pub name: String,
     /// Icon content identifier
-    pub icon_cid: [u8; Self::ICON_CID_SIZE],
+    pub icon_cid: Vec<u8>,
     /// Domain name of the related program
     pub domain_name: String,
     /// Allowed redirect URI for Vaccount in program
@@ -31,8 +29,15 @@ pub struct RelatedProgramInfo {
 }
 
 impl RelatedProgramInfo {
-    /// https://pascalprecht.github.io/posts/content-identifiers-in-ipfs
-    pub const ICON_CID_SIZE: usize = 64;
+    /// https://en.wikipedia.org/wiki/Domain_name#Domain_name_syntax
+    pub const MAX_DOMAIN_LEN: u8 = 253;
+    /// Is valid domain name
+    pub fn is_valid_domain_name(domain_name: &String) -> bool {
+        if domain_name.len() > Self::MAX_DOMAIN_LEN as usize {
+            return false;
+        }
+        true
+    }
 }
 
 impl RelyingPartyData {
@@ -50,7 +55,8 @@ impl IsInitialized for RelyingPartyData {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use std::convert::TryInto;
+    use cid::Cid;
+    use std::convert::TryFrom;
     /// Version for tests
     pub const TEST_VERSION: u8 = 1;
     /// Pubkey for tests
@@ -60,9 +66,12 @@ pub mod tests {
     /// Related program name
     #[test]
     fn serialize_desialize_data() {
+        let bs58_cid = "QmdfTbBqBPQ7VNxZEYEj14VmRuZBkqFbiwReogJgS1zR1n";
+        let cid = Cid::try_from(bs58_cid).unwrap().to_bytes();
+
         let related_program_data: RelatedProgramInfo = RelatedProgramInfo {
             name: String::from("test_program"),
-            icon_cid: "d2a84f4b8b650937ec8f73cd8be2c74add5a911ba64df27458ed8229da804a26".as_bytes().try_into().unwrap(),
+            icon_cid: cid,
             domain_name: String::from("http://localhost:8989/"),
             redirect_uri: vec![
                 "https://velas.com/ru".to_string(),
@@ -73,7 +82,6 @@ pub mod tests {
         let relying_party_data: RelyingPartyData = RelyingPartyData {
             version: TEST_VERSION,
             authority: TEST_AUTHORITY_PUBKEY,
-            related_program: TEST_AUTHORITY_PUBKEY,
             related_program_data: related_program_data,
         };
 
