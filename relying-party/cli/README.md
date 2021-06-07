@@ -100,7 +100,7 @@ Get all possible package's commands — ``vpl-relying-party --help``:
 
 ```bash
 vpl-relying-party-cli 0.1.0
-VLX Relying Party Command-line Utility
+VPL Relying Party Command-line Utility
 
 USAGE:
     vpl-relying-party [FLAGS] [OPTIONS] <SUBCOMMAND>
@@ -164,7 +164,7 @@ Create `relying-party` account — ``vpl-relying-party create-account``:
 | fee-payer              | Keypair | No       | Filepath or URL to a fee-payer keypair [default: client keypair]                                                                               |
 
 ```bash
-$ vlx-relying-party create-account "azino333" QmWATWQ7fVPP2EFGu71UkfnqhYXDYH566qy47CnJDgvs8u http://azino.com http://azino.com/pay http://azino.com/play  --url http://127.0.0.1:8899                                                                                                          
+$ vpl-relying-party create-account "azino333" QmWATWQ7fVPP2EFGu71UkfnqhYXDYH566qy47CnJDgvs8u http://azino.com http://azino.com/pay http://azino.com/play  --url http://127.0.0.1:8899                                                                                                          
 
 Signature: 4CH13f432ygibj2kBsoRJpG4HsnhDRA4pMgrd384bRNS37p5HYEtKQ4mR9iEviiugCMqoBUWa6BLHnEW4CzibatV
 Relying Party Address: Bu1dW7aAyWXDgHPiLS5ch6KFgzaiwFknzKRkmNrzf8xH
