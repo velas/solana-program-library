@@ -2,7 +2,7 @@
 name = "vpl-relying-party-cli"
 version = "0.1.0"
 description = "VPL Relying Party Command-line Utility"
-authors = ["Vlad Pavlichek <vlader112@gmail.com>"]
+authors = ["Velas <info@velas.com>", "Vlad Pavlichek <vlader112@gmail.com>"]
 repository = "https://github.com/velas/velas-program-library"
 license = "Apache-2.0"
 edition = "2018"
