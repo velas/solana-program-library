@@ -38,7 +38,7 @@ impl Processor {
         let parent_name_owner = next_account_info(accounts_iter).ok();
 
         let (name_account_key, seeds) = get_seeds_and_key(
-            &program_id,
+            program_id,
             hashed_name,
             Some(name_class.key),
             Some(parent_name_account.key),
@@ -84,7 +84,7 @@ impl Processor {
             // The creation is done in three steps: transfer, allocate and assign, because
             // one cannot `system_instruction::create` an account to which lamports have been transfered before.
             invoke(
-                &system_instruction::transfer(&payer_account.key, &name_account_key, lamports),
+                &system_instruction::transfer(payer_account.key, &name_account_key, lamports),
                 &[
                     payer_account.clone(),
                     name_account.clone(),
@@ -93,13 +93,16 @@ impl Processor {
             )?;
 
             invoke_signed(
-                &system_instruction::allocate(&name_account_key, space as u64),
+                &system_instruction::allocate(
+                    &name_account_key,
+                    (NameRecordHeader::LEN + space as usize) as u64,
+                ),
                 &[name_account.clone(), system_program.clone()],
                 &[&seeds.chunks(32).collect::<Vec<&[u8]>>()],
             )?;
 
             invoke_signed(
-                &system_instruction::assign(name_account.key, &program_id),
+                &system_instruction::assign(name_account.key, program_id),
                 &[name_account.clone(), system_program.clone()],
                 &[&seeds.chunks(32).collect::<Vec<&[u8]>>()],
             )?;
@@ -213,7 +216,7 @@ impl Processor {
         msg!("Beginning processing");
         let instruction = NameRegistryInstruction::try_from_slice(instruction_data)
             .map_err(|_| ProgramError::InvalidInstructionData)?;
-        msg!("Instruction unpack_from_sliceed");
+        msg!("Instruction unpacked");
 
         match instruction {
             NameRegistryInstruction::Create {

@@ -1,11 +1,12 @@
-import { PublicKey, Connection } from "@solana/web3.js";
-import { Schema, deserializeUnchecked } from "@bonfida/borsh-js";
+import { Connection, PublicKey } from '@solana/web3.js';
+import { deserializeUnchecked, Schema } from 'borsh';
 
 export class NameRegistryState {
+  static HEADER_LEN = 96;
   parentName: PublicKey;
   owner: PublicKey;
   class: PublicKey;
-  data: Buffer;
+  data: Buffer | undefined;
 
   static schema: Schema = new Map([
     [
@@ -16,7 +17,6 @@ export class NameRegistryState {
           ['parentName', [32]],
           ['owner', [32]],
           ['class', [32]],
-          ['data', ['u8']],
         ],
       },
     ],
@@ -25,21 +25,19 @@ export class NameRegistryState {
     parentName: Uint8Array;
     owner: Uint8Array;
     class: Uint8Array;
-    data: Uint8Array;
   }) {
     this.parentName = new PublicKey(obj.parentName);
     this.owner = new PublicKey(obj.owner);
     this.class = new PublicKey(obj.class);
-    this.data = Buffer.from(obj.data);
   }
 
-  static async retrieve(
+  public static async retrieve(
     connection: Connection,
-    nameAccountKey: PublicKey,
+    nameAccountKey: PublicKey
   ): Promise<NameRegistryState> {
     let nameAccount = await connection.getAccountInfo(
       nameAccountKey,
-      'processed',
+      'processed'
     );
     if (!nameAccount) {
       throw new Error('Invalid name account provided');
@@ -48,9 +46,11 @@ export class NameRegistryState {
     let res: NameRegistryState = deserializeUnchecked(
       this.schema,
       NameRegistryState,
-      nameAccount.data,
+      nameAccount.data
     );
+
+    res.data = nameAccount.data?.slice(this.HEADER_LEN);
+
     return res;
   }
-
 }

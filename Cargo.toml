@@ -19,6 +19,7 @@ members = [
   "shared-memory/program",
   "stake-pool/cli",
   "stake-pool/program",
+  "token-lending/cli",
   "token-lending/program",
   "token-swap/program",
   "token-swap/program/fuzz",

@@ -3,9 +3,10 @@
 mod helpers;
 
 use {
-    borsh::BorshDeserialize,
     helpers::*,
-    solana_program::{instruction::InstructionError, pubkey::Pubkey},
+    solana_program::{
+        borsh::try_from_slice_unchecked, instruction::InstructionError, pubkey::Pubkey,
+    },
     solana_program_test::*,
     solana_sdk::{
         signature::{Keypair, Signer},
@@ -75,7 +76,7 @@ async fn success() {
         &stake_pool_accounts.stake_pool.pubkey(),
     )
     .await;
-    let stake_pool = StakePool::try_from_slice(&stake_pool.data.as_slice()).unwrap();
+    let stake_pool = try_from_slice_unchecked::<StakePool>(&stake_pool.data.as_slice()).unwrap();
     assert_eq!(pre_balance, stake_pool.total_stake_lamports);
 
     let pre_token_supply = get_token_supply(
@@ -93,7 +94,103 @@ async fn success() {
         .await;
     assert!(error.is_none());
 
-    // Add extra funds, simulating rewards
+    // Increment vote credits to earn rewards
+    const VOTE_CREDITS: u64 = 1_000;
+    for stake_account in &stake_accounts {
+        context.increment_vote_account_credits(&stake_account.vote.pubkey(), VOTE_CREDITS);
+    }
+
+    // Update epoch
+    context.warp_to_slot(50_000).unwrap();
+
+    // Update list and pool
+    let error = stake_pool_accounts
+        .update_all(
+            &mut context.banks_client,
+            &context.payer,
+            &context.last_blockhash,
+            stake_accounts
+                .iter()
+                .map(|v| v.vote.pubkey())
+                .collect::<Vec<Pubkey>>()
+                .as_slice(),
+            false,
+        )
+        .await;
+    assert!(error.is_none());
+
+    // Check fee
+    let post_balance = get_validator_list_sum(
+        &mut context.banks_client,
+        &stake_pool_accounts.reserve_stake.pubkey(),
+        &stake_pool_accounts.validator_list.pubkey(),
+    )
+    .await;
+    let stake_pool = get_account(
+        &mut context.banks_client,
+        &stake_pool_accounts.stake_pool.pubkey(),
+    )
+    .await;
+    let stake_pool = try_from_slice_unchecked::<StakePool>(&stake_pool.data.as_slice()).unwrap();
+    assert_eq!(post_balance, stake_pool.total_stake_lamports);
+
+    let actual_fee = get_token_balance(
+        &mut context.banks_client,
+        &stake_pool_accounts.pool_fee_account.pubkey(),
+    )
+    .await;
+    let pool_token_supply = get_token_supply(
+        &mut context.banks_client,
+        &stake_pool_accounts.pool_mint.pubkey(),
+    )
+    .await;
+    assert_eq!(pool_token_supply - pre_token_supply, actual_fee);
+
+    let expected_fee_lamports =
+        (post_balance - pre_balance) * stake_pool.fee.numerator / stake_pool.fee.denominator;
+    let actual_fee_lamports = stake_pool.calc_pool_tokens_for_deposit(actual_fee).unwrap();
+    assert_eq!(actual_fee_lamports, expected_fee_lamports);
+
+    let expected_fee = expected_fee_lamports * pool_token_supply / post_balance;
+    assert_eq!(expected_fee, actual_fee);
+
+    assert_eq!(pool_token_supply, stake_pool.pool_token_supply);
+}
+
+#[tokio::test]
+async fn success_ignoring_extra_lamports() {
+    let (mut context, stake_pool_accounts, stake_accounts) = setup().await;
+
+    let pre_balance = get_validator_list_sum(
+        &mut context.banks_client,
+        &stake_pool_accounts.reserve_stake.pubkey(),
+        &stake_pool_accounts.validator_list.pubkey(),
+    )
+    .await;
+    let stake_pool = get_account(
+        &mut context.banks_client,
+        &stake_pool_accounts.stake_pool.pubkey(),
+    )
+    .await;
+    let stake_pool = try_from_slice_unchecked::<StakePool>(&stake_pool.data.as_slice()).unwrap();
+    assert_eq!(pre_balance, stake_pool.total_stake_lamports);
+
+    let pre_token_supply = get_token_supply(
+        &mut context.banks_client,
+        &stake_pool_accounts.pool_mint.pubkey(),
+    )
+    .await;
+
+    let error = stake_pool_accounts
+        .update_stake_pool_balance(
+            &mut context.banks_client,
+            &context.payer,
+            &context.last_blockhash,
+        )
+        .await;
+    assert!(error.is_none());
+
+    // Transfer extra funds, should not be taken into account
     const EXTRA_STAKE_AMOUNT: u64 = 1_000_000;
     for stake_account in &stake_accounts {
         transfer(
@@ -132,36 +229,13 @@ async fn success() {
         &stake_pool_accounts.validator_list.pubkey(),
     )
     .await;
-    let stake_pool = get_account(
-        &mut context.banks_client,
-        &stake_pool_accounts.stake_pool.pubkey(),
-    )
-    .await;
-    let stake_pool = StakePool::try_from_slice(&stake_pool.data.as_slice()).unwrap();
-    assert_eq!(post_balance, stake_pool.total_stake_lamports);
-
-    let actual_fee = get_token_balance(
-        &mut context.banks_client,
-        &stake_pool_accounts.pool_fee_account.pubkey(),
-    )
-    .await;
+    assert_eq!(post_balance, pre_balance);
     let pool_token_supply = get_token_supply(
         &mut context.banks_client,
         &stake_pool_accounts.pool_mint.pubkey(),
     )
     .await;
-
-    let stake_pool_info = get_account(
-        &mut context.banks_client,
-        &stake_pool_accounts.stake_pool.pubkey(),
-    )
-    .await;
-    let stake_pool = StakePool::try_from_slice(&stake_pool_info.data).unwrap();
-    let expected_fee = (post_balance - pre_balance) * pre_token_supply / pre_balance
-        * stake_pool.fee.numerator
-        / stake_pool.fee.denominator;
-    assert_eq!(actual_fee, expected_fee);
-    assert_eq!(pool_token_supply, stake_pool.pool_token_supply);
+    assert_eq!(pool_token_supply, pre_token_supply);
 }
 
 #[tokio::test]
@@ -220,6 +294,32 @@ async fn fail_with_wrong_pool_fee_account() {
         }
         _ => panic!("Wrong error occurs while try to update pool balance with wrong validator stake list account"),
     }
+}
+
+#[tokio::test]
+async fn fail_with_wrong_reserve() {
+    let (mut banks_client, payer, recent_blockhash) = program_test().start().await;
+    let mut stake_pool_accounts = StakePoolAccounts::new();
+    stake_pool_accounts
+        .initialize_stake_pool(&mut banks_client, &payer, &recent_blockhash, 1)
+        .await
+        .unwrap();
+
+    let wrong_reserve_stake = Keypair::new();
+    stake_pool_accounts.reserve_stake = wrong_reserve_stake;
+    let error = stake_pool_accounts
+        .update_stake_pool_balance(&mut banks_client, &payer, &recent_blockhash)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        error,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(StakePoolError::InvalidProgramAddress as u32),
+        )
+    );
 }
 
 #[tokio::test]

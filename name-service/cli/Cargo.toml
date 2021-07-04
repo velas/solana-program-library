@@ -1,0 +1,29 @@
+[package]
+name = "vpl-name-service-cli"
+version = "0.1.0"
+description = "VPL Name Service Command-line Utility"
+authors = ["Vlad Pavlichek <vlader112@gmail.com>"]
+repository = "https://github.com/velas/velas-program-library"
+license = "Apache-2.0"
+edition = "2018"
+readme = "README.md"
+
+[dependencies]
+borsh = "0.9.0"
+borsh-derive = "0.8.1"
+clap = "2.33.3"
+cid = "0.7.0"
+multihash = "0.10"
+solana-clap-utils = "1.7.4"
+solana-cli-config = "1.7.4"
+solana-client = "1.7.4"
+solana-logger = "1.7.4"
+solana-sdk = "1.7.4"
+spl-name-service = { version = "0.1.0", path = "../program", features = ["no-entrypoint"] }
+
+[[bin]]
+name = "vpl-name-register"
+path = "src/main.rs"
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]

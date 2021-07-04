@@ -3,10 +3,10 @@
 mod helpers;
 
 use {
-    borsh::{BorshDeserialize, BorshSerialize},
+    borsh::BorshSerialize,
     helpers::*,
     solana_program::{
-        borsh::get_packed_len,
+        borsh::{get_instance_packed_len, get_packed_len, try_from_slice_unchecked},
         hash::Hash,
         instruction::{AccountMeta, Instruction},
         program_pack::Pack,
@@ -18,10 +18,7 @@ use {
         instruction::InstructionError, signature::Keypair, signature::Signer,
         transaction::Transaction, transaction::TransactionError, transport::TransportError,
     },
-    spl_stake_pool::{
-        borsh::{get_instance_packed_len, try_from_slice_unchecked},
-        error, id, instruction, stake_program, state,
-    },
+    spl_stake_pool::{error, id, instruction, stake_program, state},
 };
 
 async fn create_required_accounts(
@@ -88,7 +85,7 @@ async fn success() {
     .await;
     let validator_list =
         try_from_slice_unchecked::<state::ValidatorList>(validator_list.data.as_slice()).unwrap();
-    assert_eq!(validator_list.is_valid(), true);
+    assert!(validator_list.is_valid());
 }
 
 #[tokio::test]
@@ -314,6 +311,89 @@ async fn fail_with_wrong_mint_authority() {
         }
         _ => panic!("Wrong error occurs while try to initialize stake pool with wrong mint authority of pool fee account"),
     }
+}
+
+#[tokio::test]
+async fn fail_with_freeze_authority() {
+    let (mut banks_client, payer, recent_blockhash) = program_test().start().await;
+    let stake_pool_accounts = StakePoolAccounts::new();
+
+    create_required_accounts(
+        &mut banks_client,
+        &payer,
+        &recent_blockhash,
+        &stake_pool_accounts,
+    )
+    .await;
+
+    // create mint with freeze authority
+    let wrong_mint = Keypair::new();
+    let rent = banks_client.get_rent().await.unwrap();
+    let mint_rent = rent.minimum_balance(spl_token::state::Mint::LEN);
+
+    let transaction = Transaction::new_signed_with_payer(
+        &[
+            system_instruction::create_account(
+                &payer.pubkey(),
+                &wrong_mint.pubkey(),
+                mint_rent,
+                spl_token::state::Mint::LEN as u64,
+                &spl_token::id(),
+            ),
+            spl_token::instruction::initialize_mint(
+                &spl_token::id(),
+                &wrong_mint.pubkey(),
+                &stake_pool_accounts.withdraw_authority,
+                Some(&stake_pool_accounts.withdraw_authority),
+                0,
+            )
+            .unwrap(),
+        ],
+        Some(&payer.pubkey()),
+        &[&payer, &wrong_mint],
+        recent_blockhash,
+    );
+    banks_client.process_transaction(transaction).await.unwrap();
+
+    let pool_fee_account = Keypair::new();
+    create_token_account(
+        &mut banks_client,
+        &payer,
+        &recent_blockhash,
+        &pool_fee_account,
+        &wrong_mint.pubkey(),
+        &stake_pool_accounts.manager.pubkey(),
+    )
+    .await
+    .unwrap();
+
+    let error = create_stake_pool(
+        &mut banks_client,
+        &payer,
+        &recent_blockhash,
+        &stake_pool_accounts.stake_pool,
+        &stake_pool_accounts.validator_list,
+        &stake_pool_accounts.reserve_stake.pubkey(),
+        &wrong_mint.pubkey(),
+        &pool_fee_account.pubkey(),
+        &stake_pool_accounts.manager,
+        &stake_pool_accounts.staker.pubkey(),
+        &None,
+        &stake_pool_accounts.fee,
+        stake_pool_accounts.max_validators,
+    )
+    .await
+    .err()
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(
+        error,
+        TransactionError::InstructionError(
+            2,
+            InstructionError::Custom(error::StakePoolError::InvalidMintFreezeAuthority as u32),
+        )
+    );
 }
 
 #[tokio::test]
@@ -1029,7 +1109,8 @@ async fn success_with_required_deposit_authority() {
     // Stake pool now exists
     let stake_pool_account =
         get_account(&mut banks_client, &stake_pool_accounts.stake_pool.pubkey()).await;
-    let stake_pool = state::StakePool::try_from_slice(stake_pool_account.data.as_slice()).unwrap();
+    let stake_pool =
+        try_from_slice_unchecked::<state::StakePool>(stake_pool_account.data.as_slice()).unwrap();
     assert_eq!(
         stake_pool.deposit_authority,
         stake_pool_accounts.deposit_authority
