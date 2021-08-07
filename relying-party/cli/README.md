@@ -37,7 +37,7 @@ Velas's programming model and the definitions of the Velas terms used in this do
 Install the package from the [crates](https://crates.io/crates/libc) through `cargo`:
 
 ```bash
-$ cargo install relying-party-cli
+$ git clone https://github.com/velas/velas-program-library.git && cargo install --path velas-program-library/relying-party/cli
 ```
 
 ## Usage
