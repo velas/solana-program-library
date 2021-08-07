@@ -2,8 +2,11 @@
 
 use {
     solana_program::{
-        borsh::get_packed_len, hash::Hash, program_pack::Pack, pubkey::Pubkey, system_instruction,
-        system_program,
+        borsh::{get_instance_packed_len, get_packed_len, try_from_slice_unchecked},
+        hash::Hash,
+        program_pack::Pack,
+        pubkey::Pubkey,
+        system_instruction, system_program,
     },
     solana_program_test::*,
     solana_sdk::{
@@ -17,7 +20,6 @@ use {
         vote_state::{VoteInit, VoteState},
     },
     spl_stake_pool::{
-        borsh::{get_instance_packed_len, try_from_slice_unchecked},
         find_stake_program_address, find_transient_stake_program_address, id, instruction,
         processor, stake_program, state,
     },
@@ -606,7 +608,7 @@ impl StakePoolAccounts {
         pool_account: &Pubkey,
         validator_stake_account: &Pubkey,
         current_staker: &Keypair,
-    ) -> Result<(), TransportError> {
+    ) -> Option<TransportError> {
         let mut signers = vec![payer, current_staker];
         let instructions = if let Some(deposit_authority) = self.deposit_authority_keypair.as_ref()
         {
@@ -620,6 +622,7 @@ impl StakePoolAccounts {
                 stake,
                 &current_staker.pubkey(),
                 validator_stake_account,
+                &self.reserve_stake.pubkey(),
                 pool_account,
                 &self.pool_mint.pubkey(),
                 &spl_token::id(),
@@ -633,6 +636,7 @@ impl StakePoolAccounts {
                 stake,
                 &current_staker.pubkey(),
                 validator_stake_account,
+                &self.reserve_stake.pubkey(),
                 pool_account,
                 &self.pool_mint.pubkey(),
                 &spl_token::id(),
@@ -644,8 +648,7 @@ impl StakePoolAccounts {
             &signers,
             *recent_blockhash,
         );
-        banks_client.process_transaction(transaction).await?;
-        Ok(())
+        banks_client.process_transaction(transaction).await.err()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -873,6 +876,30 @@ impl StakePoolAccounts {
         );
         banks_client.process_transaction(transaction).await.err()
     }
+
+    pub async fn set_preferred_validator(
+        &self,
+        banks_client: &mut BanksClient,
+        payer: &Keypair,
+        recent_blockhash: &Hash,
+        validator_type: instruction::PreferredValidatorType,
+        validator: Option<Pubkey>,
+    ) -> Option<TransportError> {
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction::set_preferred_validator(
+                &id(),
+                &self.stake_pool.pubkey(),
+                &self.staker.pubkey(),
+                &self.validator_list.pubkey(),
+                validator_type,
+                validator,
+            )],
+            Some(&payer.pubkey()),
+            &[payer, &self.staker],
+            *recent_blockhash,
+        );
+        banks_client.process_transaction(transaction).await.err()
+    }
 }
 
 pub async fn simple_add_validator_to_pool(
@@ -986,7 +1013,7 @@ impl DepositStakeAccount {
         .await
         .unwrap();
 
-        stake_pool_accounts
+        let error = stake_pool_accounts
             .deposit_stake(
                 banks_client,
                 payer,
@@ -996,8 +1023,8 @@ impl DepositStakeAccount {
                 &self.validator_stake_account,
                 &self.authority,
             )
-            .await
-            .unwrap();
+            .await;
+        assert!(error.is_none());
     }
 }
 
@@ -1051,7 +1078,7 @@ pub async fn simple_deposit(
     .unwrap();
 
     let validator_stake_account = validator_stake_account.stake_account;
-    stake_pool_accounts
+    let error = stake_pool_accounts
         .deposit_stake(
             banks_client,
             payer,
@@ -1061,8 +1088,11 @@ pub async fn simple_deposit(
             &validator_stake_account,
             &authority,
         )
-        .await
-        .ok()?;
+        .await;
+    // backwards, but oh well!
+    if error.is_some() {
+        return None;
+    }
 
     let pool_tokens = get_token_balance(banks_client, &pool_account.pubkey()).await;
 
@@ -1098,7 +1128,7 @@ pub async fn get_validator_list_sum(
     let validator_sum: u64 = validator_list
         .validators
         .iter()
-        .map(|info| info.stake_lamports)
+        .map(|info| info.stake_lamports())
         .sum();
     let rent = banks_client.get_rent().await.unwrap();
     let rent = rent.minimum_balance(std::mem::size_of::<stake_program::StakeState>());

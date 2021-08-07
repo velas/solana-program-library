@@ -18,20 +18,23 @@ use {
     },
     solana_client::rpc_client::RpcClient,
     solana_program::{
-        borsh::get_packed_len, instruction::Instruction, program_pack::Pack, pubkey::Pubkey,
+        borsh::{get_instance_packed_len, get_packed_len},
+        instruction::Instruction,
+        program_pack::Pack,
+        pubkey::Pubkey,
     },
     solana_sdk::{
         commitment_config::CommitmentConfig,
         native_token::{self, Sol},
         signature::{Keypair, Signer},
+        signers::Signers,
         system_instruction,
         transaction::Transaction,
     },
     spl_associated_token_account::{create_associated_token_account, get_associated_token_address},
     spl_stake_pool::{
-        self,
-        borsh::get_instance_packed_len,
-        find_stake_program_address, find_withdraw_authority_program_address,
+        self, find_stake_program_address, find_withdraw_authority_program_address,
+        instruction::PreferredValidatorType,
         stake_program::{self, StakeState},
         state::{Fee, StakePool, ValidatorList},
     },
@@ -80,6 +83,20 @@ fn check_fee_payer_balance(config: &Config, required_balance: u64) -> Result<(),
     }
 }
 
+fn send_transaction_no_wait(
+    config: &Config,
+    transaction: Transaction,
+) -> solana_client::client_error::Result<()> {
+    if config.dry_run {
+        let result = config.rpc_client.simulate_transaction(&transaction)?;
+        println!("Simulate result: {:?}", result);
+    } else {
+        let signature = config.rpc_client.send_transaction(&transaction)?;
+        println!("Signature: {}", signature);
+    }
+    Ok(())
+}
+
 fn send_transaction(
     config: &Config,
     transaction: Transaction,
@@ -96,6 +113,23 @@ fn send_transaction(
     Ok(())
 }
 
+fn checked_transaction_with_signers<T: Signers>(
+    config: &Config,
+    instructions: &[Instruction],
+    signers: &T,
+) -> Result<Transaction, Error> {
+    let (recent_blockhash, fee_calculator) = config.rpc_client.get_recent_blockhash()?;
+    let transaction = Transaction::new_signed_with_payer(
+        instructions,
+        Some(&config.fee_payer.pubkey()),
+        signers,
+        recent_blockhash,
+    );
+
+    check_fee_payer_balance(config, fee_calculator.calculate_fee(transaction.message()))?;
+    Ok(transaction)
+}
+
 fn command_create_pool(
     config: &Config,
     deposit_authority: Option<Pubkey>,
@@ -103,9 +137,10 @@ fn command_create_pool(
     max_validators: u32,
     stake_pool_keypair: Option<Keypair>,
     mint_keypair: Option<Keypair>,
+    reserve_keypair: Option<Keypair>,
 ) -> CommandResult {
-    let reserve_stake = Keypair::new();
-    println!("Creating reserve stake {}", reserve_stake.pubkey());
+    let reserve_keypair = reserve_keypair.unwrap_or_else(Keypair::new);
+    println!("Creating reserve stake {}", reserve_keypair.pubkey());
 
     let mint_keypair = mint_keypair.unwrap_or_else(Keypair::new);
     println!("Creating mint {}", mint_keypair.pubkey());
@@ -161,13 +196,13 @@ fn command_create_pool(
             // Account for the stake pool reserve
             system_instruction::create_account(
                 &config.fee_payer.pubkey(),
-                &reserve_stake.pubkey(),
+                &reserve_keypair.pubkey(),
                 reserve_stake_balance,
                 STAKE_STATE_LEN as u64,
                 &stake_program::id(),
             ),
             stake_program::initialize(
-                &reserve_stake.pubkey(),
+                &reserve_keypair.pubkey(),
                 &stake_program::Authorized {
                     staker: withdraw_authority,
                     withdrawer: withdraw_authority,
@@ -234,7 +269,7 @@ fn command_create_pool(
                 &config.manager.pubkey(),
                 &config.staker.pubkey(),
                 &validator_list.pubkey(),
-                &reserve_stake.pubkey(),
+                &reserve_keypair.pubkey(),
                 &mint_keypair.pubkey(),
                 &pool_fee_account.pubkey(),
                 &spl_token::id(),
@@ -250,18 +285,18 @@ fn command_create_pool(
     check_fee_payer_balance(
         config,
         total_rent_free_balances
-            + fee_calculator.calculate_fee(&setup_transaction.message())
-            + fee_calculator.calculate_fee(&initialize_transaction.message()),
+            + fee_calculator.calculate_fee(setup_transaction.message())
+            + fee_calculator.calculate_fee(initialize_transaction.message()),
     )?;
     let mut setup_signers = vec![
         config.fee_payer.as_ref(),
         &mint_keypair,
         &pool_fee_account,
-        &reserve_stake,
+        &reserve_keypair,
     ];
     unique_signers!(setup_signers);
     setup_transaction.sign(&setup_signers, recent_blockhash);
-    send_transaction(&config, setup_transaction)?;
+    send_transaction(config, setup_transaction)?;
 
     println!("Creating stake pool {}", stake_pool_keypair.pubkey());
     let mut initialize_signers = vec![
@@ -272,7 +307,7 @@ fn command_create_pool(
     ];
     unique_signers!(initialize_signers);
     initialize_transaction.sign(&initialize_signers, recent_blockhash);
-    send_transaction(&config, initialize_transaction)?;
+    send_transaction(config, initialize_transaction)?;
     Ok(())
 }
 
@@ -282,27 +317,21 @@ fn command_vsa_create(
     vote_account: &Pubkey,
 ) -> CommandResult {
     println!("Creating stake account on {}", vote_account);
-
-    let mut transaction = Transaction::new_with_payer(
+    let transaction = checked_transaction_with_signers(
+        config,
         &[
             // Create new validator stake account address
             spl_stake_pool::instruction::create_validator_stake_account_with_vote(
-                &stake_pool_address,
+                &spl_stake_pool::id(),
+                stake_pool_address,
                 &config.staker.pubkey(),
                 &config.fee_payer.pubkey(),
-                &vote_account,
+                vote_account,
             ),
         ],
-        Some(&config.fee_payer.pubkey()),
-    );
-
-    let (recent_blockhash, fee_calculator) = config.rpc_client.get_recent_blockhash()?;
-    check_fee_payer_balance(config, fee_calculator.calculate_fee(&transaction.message()))?;
-    transaction.sign(
         &[config.fee_payer.as_ref(), config.staker.as_ref()],
-        recent_blockhash,
-    );
-    send_transaction(&config, transaction)?;
+    )?;
+    send_transaction(config, transaction)?;
     Ok(())
 }
 
@@ -341,21 +370,22 @@ fn command_vsa_add(
         command_update(config, stake_pool_address, false, false)?;
     }
 
-    let instruction = spl_stake_pool::instruction::add_validator_to_pool_with_vote(
-        &stake_pool,
-        &stake_pool_address,
-        &vote_account,
-    );
-
-    let mut transaction =
-        Transaction::new_with_payer(&[instruction], Some(&config.fee_payer.pubkey()));
-
-    let (recent_blockhash, fee_calculator) = config.rpc_client.get_recent_blockhash()?;
-    check_fee_payer_balance(config, fee_calculator.calculate_fee(&transaction.message()))?;
     let mut signers = vec![config.fee_payer.as_ref(), config.staker.as_ref()];
     unique_signers!(signers);
-    transaction.sign(&signers, recent_blockhash);
-    send_transaction(&config, transaction)?;
+    let transaction = checked_transaction_with_signers(
+        config,
+        &[
+            spl_stake_pool::instruction::add_validator_to_pool_with_vote(
+                &spl_stake_pool::id(),
+                &stake_pool,
+                stake_pool_address,
+                vote_account,
+            ),
+        ],
+        &signers,
+    )?;
+
+    send_transaction(config, transaction)?;
     Ok(())
 }
 
@@ -374,26 +404,23 @@ fn command_vsa_remove(
     let staker_pubkey = config.staker.pubkey();
     let new_authority = new_authority.as_ref().unwrap_or(&staker_pubkey);
 
-    let mut transaction = Transaction::new_with_payer(
+    let mut signers = vec![config.fee_payer.as_ref(), config.staker.as_ref()];
+    unique_signers!(signers);
+    let transaction = checked_transaction_with_signers(
+        config,
         &[
             // Create new validator stake account address
             spl_stake_pool::instruction::remove_validator_from_pool_with_vote(
+                &spl_stake_pool::id(),
                 &stake_pool,
                 stake_pool_address,
                 vote_account,
                 new_authority,
             ),
         ],
-        Some(&config.fee_payer.pubkey()),
-    );
-
-    let (recent_blockhash, fee_calculator) = config.rpc_client.get_recent_blockhash()?;
-    check_fee_payer_balance(config, fee_calculator.calculate_fee(&transaction.message()))?;
-    transaction.sign(
-        &[config.fee_payer.as_ref(), config.staker.as_ref()],
-        recent_blockhash,
-    );
-    send_transaction(&config, transaction)?;
+        &signers,
+    )?;
+    send_transaction(config, transaction)?;
     Ok(())
 }
 
@@ -409,23 +436,23 @@ fn command_increase_validator_stake(
     }
 
     let stake_pool = get_stake_pool(&config.rpc_client, stake_pool_address)?;
-    let instruction = spl_stake_pool::instruction::increase_validator_stake_with_vote(
-        &stake_pool,
-        stake_pool_address,
-        vote_account,
-        lamports,
-    );
 
-    let mut transaction =
-        Transaction::new_with_payer(&[instruction], Some(&config.fee_payer.pubkey()));
-
-    let (recent_blockhash, fee_calculator) = config.rpc_client.get_recent_blockhash()?;
-    check_fee_payer_balance(config, fee_calculator.calculate_fee(&transaction.message()))?;
-    transaction.sign(
-        &[config.fee_payer.as_ref(), config.staker.as_ref()],
-        recent_blockhash,
-    );
-    send_transaction(&config, transaction)?;
+    let mut signers = vec![config.fee_payer.as_ref(), config.staker.as_ref()];
+    unique_signers!(signers);
+    let transaction = checked_transaction_with_signers(
+        config,
+        &[
+            spl_stake_pool::instruction::increase_validator_stake_with_vote(
+                &spl_stake_pool::id(),
+                &stake_pool,
+                stake_pool_address,
+                vote_account,
+                lamports,
+            ),
+        ],
+        &signers,
+    )?;
+    send_transaction(config, transaction)?;
     Ok(())
 }
 
@@ -441,23 +468,48 @@ fn command_decrease_validator_stake(
     }
 
     let stake_pool = get_stake_pool(&config.rpc_client, stake_pool_address)?;
-    let instruction = spl_stake_pool::instruction::decrease_validator_stake_with_vote(
-        &stake_pool,
-        stake_pool_address,
-        vote_account,
-        lamports,
-    );
 
-    let mut transaction =
-        Transaction::new_with_payer(&[instruction], Some(&config.fee_payer.pubkey()));
+    let mut signers = vec![config.fee_payer.as_ref(), config.staker.as_ref()];
+    unique_signers!(signers);
+    let transaction = checked_transaction_with_signers(
+        config,
+        &[
+            spl_stake_pool::instruction::decrease_validator_stake_with_vote(
+                &spl_stake_pool::id(),
+                &stake_pool,
+                stake_pool_address,
+                vote_account,
+                lamports,
+            ),
+        ],
+        &signers,
+    )?;
+    send_transaction(config, transaction)?;
+    Ok(())
+}
 
-    let (recent_blockhash, fee_calculator) = config.rpc_client.get_recent_blockhash()?;
-    check_fee_payer_balance(config, fee_calculator.calculate_fee(&transaction.message()))?;
-    transaction.sign(
-        &[config.fee_payer.as_ref(), config.staker.as_ref()],
-        recent_blockhash,
-    );
-    send_transaction(&config, transaction)?;
+fn command_set_preferred_validator(
+    config: &Config,
+    stake_pool_address: &Pubkey,
+    preferred_type: PreferredValidatorType,
+    vote_address: Option<Pubkey>,
+) -> CommandResult {
+    let stake_pool = get_stake_pool(&config.rpc_client, stake_pool_address)?;
+    let mut signers = vec![config.fee_payer.as_ref(), config.staker.as_ref()];
+    unique_signers!(signers);
+    let transaction = checked_transaction_with_signers(
+        config,
+        &[spl_stake_pool::instruction::set_preferred_validator(
+            &spl_stake_pool::id(),
+            stake_pool_address,
+            &config.staker.pubkey(),
+            &stake_pool.validator_list,
+            preferred_type,
+            vote_address,
+        )],
+        &signers,
+    )?;
+    send_transaction(config, transaction)?;
     Ok(())
 }
 
@@ -500,7 +552,7 @@ fn command_deposit(
     }
 
     let stake_pool = get_stake_pool(&config.rpc_client, stake_pool_address)?;
-    let stake_state = get_stake_state(&config.rpc_client, &stake)?;
+    let stake_state = get_stake_state(&config.rpc_client, stake)?;
 
     if config.verbose {
         println!("Depositing stake account {:?}", stake_state);
@@ -533,7 +585,7 @@ fn command_deposit(
 
     // Create token account if not specified
     let token_receiver = token_receiver.unwrap_or(add_associated_token_account(
-        &config,
+        config,
         &stake_pool.pool_mint,
         &mut instructions,
         &mut total_rent_free_balances,
@@ -555,13 +607,14 @@ fn command_deposit(
 
         spl_stake_pool::instruction::deposit_with_authority(
             &spl_stake_pool::id(),
-            &stake_pool_address,
+            stake_pool_address,
             &stake_pool.validator_list,
             &deposit_authority.pubkey(),
             &pool_withdraw_authority,
-            &stake,
+            stake,
             &config.staker.pubkey(),
             &validator_stake_account,
+            &stake_pool.reserve_stake,
             &token_receiver,
             &stake_pool.pool_mint,
             &spl_token::id(),
@@ -569,12 +622,13 @@ fn command_deposit(
     } else {
         spl_stake_pool::instruction::deposit(
             &spl_stake_pool::id(),
-            &stake_pool_address,
+            stake_pool_address,
             &stake_pool.validator_list,
             &pool_withdraw_authority,
-            &stake,
+            stake,
             &config.staker.pubkey(),
             &validator_stake_account,
+            &stake_pool.reserve_stake,
             &token_receiver,
             &stake_pool.pool_mint,
             &spl_token::id(),
@@ -589,11 +643,11 @@ fn command_deposit(
     let (recent_blockhash, fee_calculator) = config.rpc_client.get_recent_blockhash()?;
     check_fee_payer_balance(
         config,
-        total_rent_free_balances + fee_calculator.calculate_fee(&transaction.message()),
+        total_rent_free_balances + fee_calculator.calculate_fee(transaction.message()),
     )?;
     unique_signers!(signers);
     transaction.sign(&signers, recent_blockhash);
-    send_transaction(&config, transaction)?;
+    send_transaction(config, transaction)?;
     Ok(())
 }
 
@@ -603,11 +657,18 @@ fn command_list(config: &Config, stake_pool_address: &Pubkey) -> CommandResult {
     let pool_mint = get_token_mint(&config.rpc_client, &stake_pool.pool_mint)?;
     let epoch_info = config.rpc_client.get_epoch_info()?;
 
-    for validator in validator_list.validators {
+    let reserve_stake = config.rpc_client.get_account(&stake_pool.reserve_stake)?;
+    println!(
+        "Reserve Account: {}\tBalance: {}",
+        stake_pool.reserve_stake,
+        Sol(reserve_stake.lamports),
+    );
+
+    for validator in &validator_list.validators {
         println!(
             "Validator Vote Account: {}\tBalance: {}\tLast Update Epoch: {}{}",
             validator.vote_account_address,
-            Sol(validator.stake_lamports),
+            Sol(validator.stake_lamports()),
             validator.last_update_epoch,
             if validator.last_update_epoch != epoch_info.epoch {
                 " [UPDATE REQUIRED]"
@@ -629,6 +690,14 @@ fn command_list(config: &Config, stake_pool_address: &Pubkey) -> CommandResult {
     println!(
         "Total Pool Tokens: {}",
         spl_token::amount_to_ui_amount(stake_pool.pool_token_supply, pool_mint.decimals)
+    );
+    println!(
+        "Total number of validators: {}",
+        validator_list.validators.len()
+    );
+    println!(
+        "Max number of validators: {}",
+        validator_list.max_validators
     );
 
     if config.verbose {
@@ -686,23 +755,43 @@ fn command_update(
 
     let validator_list = get_validator_list(&config.rpc_client, &stake_pool.validator_list)?;
 
-    let instructions = spl_stake_pool::instruction::update_stake_pool(
-        &stake_pool,
-        &validator_list,
-        stake_pool_address,
-        no_merge,
-    );
+    let (mut update_list_instructions, update_balance_instruction) =
+        spl_stake_pool::instruction::update_stake_pool(
+            &spl_stake_pool::id(),
+            &stake_pool,
+            &validator_list,
+            stake_pool_address,
+            no_merge,
+        );
 
-    // TODO: A faster solution would be to send all the `update_validator_list_balance` instructions concurrently
-    for instruction in instructions {
-        let mut transaction =
-            Transaction::new_with_payer(&[instruction], Some(&config.fee_payer.pubkey()));
+    let update_list_instructions_len = update_list_instructions.len();
+    if update_list_instructions_len > 0 {
+        let last_instruction = update_list_instructions.split_off(update_list_instructions_len - 1);
+        // send the first ones without waiting
+        for instruction in update_list_instructions {
+            let transaction = checked_transaction_with_signers(
+                config,
+                &[instruction],
+                &[config.fee_payer.as_ref()],
+            )?;
+            send_transaction_no_wait(config, transaction)?;
+        }
 
-        let (recent_blockhash, fee_calculator) = config.rpc_client.get_recent_blockhash()?;
-        check_fee_payer_balance(config, fee_calculator.calculate_fee(&transaction.message()))?;
-        transaction.sign(&[config.fee_payer.as_ref()], recent_blockhash);
-        send_transaction(&config, transaction)?;
+        // wait on the last one
+        let transaction = checked_transaction_with_signers(
+            config,
+            &last_instruction,
+            &[config.fee_payer.as_ref()],
+        )?;
+        send_transaction(config, transaction)?;
     }
+    let transaction = checked_transaction_with_signers(
+        config,
+        &[update_balance_instruction],
+        &[config.fee_payer.as_ref()],
+    )?;
+    send_transaction(config, transaction)?;
+
     Ok(())
 }
 
@@ -719,7 +808,7 @@ fn prepare_withdraw_accounts(
     pool_amount: u64,
 ) -> Result<Vec<WithdrawAccount>, Error> {
     let mut accounts =
-        get_stake_accounts_by_withdraw_authority(rpc_client, &pool_withdraw_authority)?;
+        get_stake_accounts_by_withdraw_authority(rpc_client, pool_withdraw_authority)?;
     if accounts.is_empty() {
         return Err("No accounts found.".to_string().into());
     }
@@ -815,7 +904,7 @@ fn command_withdraw(
     } else if let Some(vote_account_address) = vote_account_address {
         let (stake_account_address, _) = find_stake_program_address(
             &spl_stake_pool::id(),
-            &vote_account_address,
+            vote_account_address,
             stake_pool_address,
         );
         let stake_account = config.rpc_client.get_account(&stake_account_address)?;
@@ -915,7 +1004,7 @@ fn command_withdraw(
 
         instructions.push(spl_stake_pool::instruction::withdraw(
             &spl_stake_pool::id(),
-            &stake_pool_address,
+            stake_pool_address,
             &stake_pool.validator_list,
             &pool_withdraw_authority,
             &withdraw_account.address,
@@ -935,11 +1024,11 @@ fn command_withdraw(
     let (recent_blockhash, fee_calculator) = config.rpc_client.get_recent_blockhash()?;
     check_fee_payer_balance(
         config,
-        total_rent_free_balances + fee_calculator.calculate_fee(&transaction.message()),
+        total_rent_free_balances + fee_calculator.calculate_fee(transaction.message()),
     )?;
     unique_signers!(signers);
     transaction.sign(&signers, recent_blockhash);
-    send_transaction(&config, transaction)?;
+    send_transaction(config, transaction)?;
     Ok(())
 }
 
@@ -971,23 +1060,20 @@ fn command_set_manager(
         }
     };
 
-    let mut transaction = Transaction::new_with_payer(
+    let mut signers = vec![config.fee_payer.as_ref(), config.manager.as_ref()];
+    unique_signers!(signers);
+    let transaction = checked_transaction_with_signers(
+        config,
         &[spl_stake_pool::instruction::set_manager(
             &spl_stake_pool::id(),
-            &stake_pool_address,
+            stake_pool_address,
             &config.manager.pubkey(),
             &new_manager,
             &new_fee_receiver,
         )],
-        Some(&config.fee_payer.pubkey()),
-    );
-
-    let (recent_blockhash, fee_calculator) = config.rpc_client.get_recent_blockhash()?;
-    check_fee_payer_balance(config, fee_calculator.calculate_fee(&transaction.message()))?;
-    let mut signers = vec![config.fee_payer.as_ref(), config.manager.as_ref()];
-    unique_signers!(signers);
-    transaction.sign(&signers, recent_blockhash);
-    send_transaction(&config, transaction)?;
+        &signers,
+    )?;
+    send_transaction(config, transaction)?;
     Ok(())
 }
 
@@ -996,42 +1082,36 @@ fn command_set_staker(
     stake_pool_address: &Pubkey,
     new_staker: &Pubkey,
 ) -> CommandResult {
-    let mut transaction = Transaction::new_with_payer(
-        &[spl_stake_pool::instruction::set_staker(
-            &spl_stake_pool::id(),
-            &stake_pool_address,
-            &config.manager.pubkey(),
-            &new_staker,
-        )],
-        Some(&config.fee_payer.pubkey()),
-    );
-
-    let (recent_blockhash, fee_calculator) = config.rpc_client.get_recent_blockhash()?;
-    check_fee_payer_balance(config, fee_calculator.calculate_fee(&transaction.message()))?;
     let mut signers = vec![config.fee_payer.as_ref(), config.manager.as_ref()];
     unique_signers!(signers);
-    transaction.sign(&signers, recent_blockhash);
-    send_transaction(&config, transaction)?;
+    let transaction = checked_transaction_with_signers(
+        config,
+        &[spl_stake_pool::instruction::set_staker(
+            &spl_stake_pool::id(),
+            stake_pool_address,
+            &config.manager.pubkey(),
+            new_staker,
+        )],
+        &signers,
+    )?;
+    send_transaction(config, transaction)?;
     Ok(())
 }
 
 fn command_set_fee(config: &Config, stake_pool_address: &Pubkey, new_fee: Fee) -> CommandResult {
-    let mut transaction = Transaction::new_with_payer(
+    let mut signers = vec![config.fee_payer.as_ref(), config.manager.as_ref()];
+    unique_signers!(signers);
+    let transaction = checked_transaction_with_signers(
+        config,
         &[spl_stake_pool::instruction::set_fee(
             &spl_stake_pool::id(),
-            &stake_pool_address,
+            stake_pool_address,
             &config.manager.pubkey(),
             new_fee,
         )],
-        Some(&config.fee_payer.pubkey()),
-    );
-
-    let (recent_blockhash, fee_calculator) = config.rpc_client.get_recent_blockhash()?;
-    check_fee_payer_balance(config, fee_calculator.calculate_fee(&transaction.message()))?;
-    let mut signers = vec![config.fee_payer.as_ref(), config.manager.as_ref()];
-    unique_signers!(signers);
-    transaction.sign(&signers, recent_blockhash);
-    send_transaction(&config, transaction)?;
+        &signers,
+    )?;
+    send_transaction(config, transaction)?;
     Ok(())
 }
 
@@ -1051,7 +1131,7 @@ fn main() {
                 .global(true)
                 .help("Configuration file to use");
             if let Some(ref config_file) = *solana_cli_config::CONFIG_FILE {
-                arg.default_value(&config_file)
+                arg.default_value(config_file)
             } else {
                 arg
             }
@@ -1203,6 +1283,14 @@ fn main() {
                     .takes_value(true)
                     .help("Stake pool mint keypair [default: new keypair]"),
             )
+            .arg(
+                Arg::with_name("reserve_keypair")
+                    .long("reserve-keypair")
+                    .validator(is_keypair_or_ask_keyword)
+                    .value_name("PATH")
+                    .takes_value(true)
+                    .help("Stake pool reserve keypair [default: new keypair]"),
+            )
         )
         .subcommand(SubCommand::with_name("create-validator-stake")
             .about("Create a new stake account to use with the pool. Must be signed by the pool staker.")
@@ -1332,6 +1420,46 @@ fn main() {
                     .value_name("AMOUNT")
                     .takes_value(true)
                     .help("Amount in lamports to remove from the validator stake account. Must be at least the rent-exempt amount for a stake."),
+            )
+        )
+        .subcommand(SubCommand::with_name("set-preferred-validator")
+            .about("Set the preferred validator for deposits or withdrawals. Must be signed by the pool staker.")
+            .arg(
+                Arg::with_name("pool")
+                    .index(1)
+                    .validator(is_pubkey)
+                    .value_name("POOL_ADDRESS")
+                    .takes_value(true)
+                    .required(true)
+                    .help("Stake pool address"),
+            )
+            .arg(
+                Arg::with_name("preferred_type")
+                    .index(2)
+                    .value_name("OPERATION")
+                    .possible_values(&["deposit", "withdraw"]) // PreferredValidatorType enum
+                    .takes_value(true)
+                    .required(true)
+                    .help("Operation for which to restrict the validator"),
+            )
+            .arg(
+                Arg::with_name("vote_account")
+                    .long("vote-account")
+                    .validator(is_pubkey)
+                    .value_name("VOTE_ACCOUNT_ADDRESS")
+                    .takes_value(true)
+                    .help("Vote account for the validator that users must deposit into."),
+            )
+            .arg(
+                Arg::with_name("unset")
+                    .long("unset")
+                    .takes_value(false)
+                    .help("Unset the preferred validator."),
+            )
+            .group(ArgGroup::with_name("validator")
+                .arg("vote_account")
+                .arg("unset")
+                .required(true)
             )
         )
         .subcommand(SubCommand::with_name("deposit")
@@ -1632,6 +1760,7 @@ fn main() {
             let max_validators = value_t_or_exit!(arg_matches, "max_validators", u32);
             let pool_keypair = keypair_of(arg_matches, "pool_keypair");
             let mint_keypair = keypair_of(arg_matches, "mint_keypair");
+            let reserve_keypair = keypair_of(arg_matches, "reserve_keypair");
             command_create_pool(
                 &config,
                 deposit_authority,
@@ -1642,6 +1771,7 @@ fn main() {
                 max_validators,
                 pool_keypair,
                 mint_keypair,
+                reserve_keypair,
             )
         }
         ("create-validator-stake", Some(arg_matches)) => {
@@ -1671,6 +1801,24 @@ fn main() {
             let vote_account = pubkey_of(arg_matches, "vote_account").unwrap();
             let amount = value_t_or_exit!(arg_matches, "amount", f64);
             command_decrease_validator_stake(&config, &stake_pool_address, &vote_account, amount)
+        }
+        ("set-preferred-validator", Some(arg_matches)) => {
+            let stake_pool_address = pubkey_of(arg_matches, "pool").unwrap();
+            let preferred_type = match arg_matches.value_of("preferred_type").unwrap() {
+                "deposit" => PreferredValidatorType::Deposit,
+                "withdraw" => PreferredValidatorType::Withdraw,
+                _ => unreachable!(),
+            };
+            let vote_account = pubkey_of(arg_matches, "vote_account");
+            let _unset = arg_matches.is_present("unset");
+            // since unset and vote_account can't both be set, if unset is set
+            // then vote_account will be None, which is valid for the program
+            command_set_preferred_validator(
+                &config,
+                &stake_pool_address,
+                preferred_type,
+                vote_account,
+            )
         }
         ("deposit", Some(arg_matches)) => {
             let stake_pool_address = pubkey_of(arg_matches, "pool").unwrap();
