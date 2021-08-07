@@ -26,6 +26,16 @@ Velas's programming model and the definitions of the Velas terms used in this do
 - https://docs.velas.com/apps
 - https://docs.velas.com/terminology
 
+#### Linux
+
+<h3 id="linux"></h4>
+
+Install devtools:
+
+```bash
+sudo apt install build-essential libcurl4-gnutls-dev libxml2-dev libssl-dev
+```
+
 #### MacOS & Linux
 
 <h3 id="macos-linux"></h4>
