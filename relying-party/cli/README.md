@@ -54,9 +54,9 @@ $ cargo install vpl-relying-party-cli
 
 You can use the following list of the addresses of the nodes to execute commands to:
 
-- `https://mainnet.velas.com/rpc`,
-- `https://testnet.velas.com/rpc`,
-- `https://devnet.velas.com/rpc`.
+- `https://api.velas.com`,
+- `https://api.testnet.velas.com`,
+- `https://api.devnet.velas.com`.
 
 ### Configuration
 
@@ -67,10 +67,10 @@ The `vpl-relying-party` configuration is shared with the `velas` command-line to
 ```bash
 $ velas config get
 
-Config File: ${HOME}/.config/solana/cli/config.yml
-RPC URL: https://mainnet.velas.com/rpc
-WebSocket URL: wss://mainnet.velas.com/rpc (computed)
-Keypair Path: ${HOME}/.config/solana/id.json
+Config File: ${HOME}/.config/velas/cli/config.yml
+RPC URL: https://api.velas.com/
+WebSocket URL: wss://api.velas.com/ (computed)
+Keypair Path: ${HOME}/.config/velas/id.json
 ```
 
 #### To set Cluster RPC URL
@@ -78,7 +78,7 @@ Keypair Path: ${HOME}/.config/solana/id.json
 See [Velas clusters](https://docs.velas.com/clusters/) for cluster-specific RPC URLs
 
 ```bash
-$ velas config set --url https://mainnet.velas.com/rpc
+$ velas config set --url https://api.velas.com
 ```
 
 #### Default Keypair
@@ -89,12 +89,6 @@ Keypair File
 
 ```bash
 $ velas config set --keypair ${HOME}/new-keypair.json
-```
-
-Hardware Wallet URL (See [URL spec](https://docs.solana.com/wallet-guide/hardware-wallets#specify-a-keypair-url))
-
-```bash
-$ velas config set --keypair usb://ledger/
 ```
 
 ### Service
@@ -121,7 +115,7 @@ FLAGS:
     -v, --verbose    Show additional information
 
 OPTIONS:
-        --authority <KEYPAIR>    Filepath or URL to a relying-party authority keypair. Relying-party authority needs to
+        --authority <KEYPAIR>    Filepath or URL to a relying-party authority keypair. This authority will be able to
                                  close the account. [default: client keypair]
     -C, --config <PATH>          Configuration file to use [default: /Users/user/.config/velas/cli/config.yml]
         --fee-payer <KEYPAIR>    Filepath or URL to a fee-payer keypair [default: client keypair]
@@ -145,18 +139,18 @@ Get `relying-party` account parsed data by its address — ``vpl-relying-party a
 | node-url              | URL    | No       | Node URL to apply a command to.      |
 
 ```bash
-$ vpl-relying-party account Bu1dW7aAyWXDgHPiLS5ch6KFgzaiwFknzKRkmNrzf8xH --url http://127.0.0.1:8899
+$ vpl-relying-party account Bu1dW7aAyWXDgHPiLS5ch6KFgzaiwFknzKRkmNrzf8xH
 
 Public Key: Bu1dW7aAyWXDgHPiLS5ch6KFgzaiwFknzKRkmNrzf8xH
 -------------------------------------------------------------------
 Relying Party Data:
     version: 1
     authority: 9atTpuaX8WoxWr7xDanvMmE41bPWkCLnSM4V4CMTu4Lq
-    Releted program data:
-        name: azino333
+    Related program data:
+        name: example-dapp333
         icon_cid: QmWATWQ7fVPP2EFGu71UkfnqhYXDYH566qy47CnJDgvs8u
-        domain_name: http://azino.com
-        redirect_uri: ["http://azino.com/pay", "http://azino.com/play"]
+        domain_name: http://example-dapp.com
+        redirect_uri: ["http://example-dapp.com/pay", "http://example-dapp.com/play"]
 ```
 
 ### Create Account
@@ -165,16 +159,16 @@ Create `relying-party` account — ``vpl-relying-party create-account``:
 
 |       Arguments        |   Type  | Required | Description                                                                                                                                    |
 | :--------------------: | :----:  | :------: | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| program-name           | String  | Yes      | The program name that associated with relying-party account.                                                                                   |
-| program-icon-cid       | String  | Yes      | Content identifier to the associated with relying-party program: https://docs.ipfs.io/concepts/content-addressing/                             |
-| program-domain-name    | URL     | Yes      | Domain name of the associated with relying-party program.                                                                                      |
-| program-redirect-uris  | URIs    | Yes      | Allowed redirect URIs for Vaccount.                                                                                                            |
+| program-name           | String  | Yes      | The display name associated with relying-party account.                                                                                        |
+| program-icon-cid       | String  | Yes      | Content identifier of the icon associated with relying-party account: https://docs.ipfs.io/concepts/content-addressing/                |
+| program-domain-name    | URL     | Yes      | Domain name associated with relying-party account.                                                                                            |
+| program-redirect-uris  | URIs    | Yes      | Allowed URIs for end-user to be redirected to.                                                                                                |
 | lamports               | Number  | No       | Lamports to create a new relying-party account.                                                                                                |
-| authority              | Keypair | No       | Filepath or URL to a relying-party authority keypair. Relying-party authority needs to close the account. [default: client keypair]            |
+| authority              | Keypair | No       | Filepath or URL to a relying-party authority keypair. This authority will be able to close the account. [default: client keypair]            |
 | fee-payer              | Keypair | No       | Filepath or URL to a fee-payer keypair [default: client keypair]                                                                               |
 
 ```bash
-$ vpl-relying-party create-account "azino333" QmWATWQ7fVPP2EFGu71UkfnqhYXDYH566qy47CnJDgvs8u http://azino.com http://azino.com/pay http://azino.com/play  --url http://127.0.0.1:8899                                                                                                          
+$ vpl-relying-party create-account "example-dapp333" QmWATWQ7fVPP2EFGu71UkfnqhYXDYH566qy47CnJDgvs8u http://example-dapp.com http://example-dapp.com/pay http://example-dapp.com/play  --url http://127.0.0.1:8899                                                                                                          
 
 Signature: 4CH13f432ygibj2kBsoRJpG4HsnhDRA4pMgrd384bRNS37p5HYEtKQ4mR9iEviiugCMqoBUWa6BLHnEW4CzibatV
 Relying Party Address: Bu1dW7aAyWXDgHPiLS5ch6KFgzaiwFknzKRkmNrzf8xH
@@ -187,9 +181,9 @@ Set close authority of the relying-party account — ``vpl-relying-party set-aut
 
 | Arguments             | Type    | Required | Description                                                                                                                                    |
 | :-------:             | :-----: | :------: | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| relying-party-address | Pubkey  | Yes      | The address of the relying-party account.                                                                                                      |
-| new-authority         | Pubkey  | Yes      | The new authority of the relying-party account.                                                                                                |
-| authority             | Keypair | No       | Filepath or URL to a relying-party authority keypair. Relying-party authority needs to close the account. [default: client keypair]            |
+| relying-party-address | Pubkey  | Yes      | Address of the relying-party account.                                                                                                      |
+| new-authority         | Pubkey  | Yes      | New authority of the relying-party account.                                                                                                |
+| authority             | Keypair | No       | Filepath or URL to current relying-party authority keypair. [default: client keypair]            |
 | fee-payer             | Keypair | No       | Filepath or URL to a fee-payer keypair [default: client keypair]                                                                               |
 
 ```bash
@@ -207,11 +201,11 @@ Close relying-party account — ``vpl-relying-party close-account``:
 | :-------:             | :-----: | :------: | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | relying-party-address | Pubkey  | Yes      | The address of the relying-party account.                                                                                                      |
 | receiver-address      | Pubkey  | Yes      | The address to send lamports from relying-party.                                                                                               |
-| authority             | Keypair | No       | Filepath or URL to a relying-party authority keypair. Relying-party authority needs to close the account. [default: client keypair]            |
+| authority             | Keypair | No       | Filepath or URL to current relying-party authority keypair. [default: client keypair]            |
 | fee-payer             | Keypair | No       | Filepath or URL to a fee-payer keypair [default: client keypair]                                                                               |
 
 ```bash
-$ vpl-relying-party close-account Bu1dW7aAyWXDgHPiLS5ch6KFgzaiwFknzKRkmNrzf8xH V9u7QR3Ff6mUMdyjvJ67M23Gr6ERzVenuyhXqcc7hFk --authority V9u7QR3Ff6mUMdyjvJ67M23Gr6ERzVenuyhXqcc7hFk.json --url http://127.0.0.1:8899  
+$ vpl-relying-party close-account Bu1dW7aAyWXDgHPiLS5ch6KFgzaiwFknzKRkmNrzf8xH V9u7QR3Ff6mUMdyjvJ67M23Gr6ERzVenuyhXqcc7hFk --authority V9u7QR3Ff6mUMdyjvJ67M23Gr6ERzVenuyhXqcc7hFk.json
 
 Signature: 2SFk6rASKYD2Nv8CiiG3TVJavpYj6FRA2xMtWTjSYXwMDEN5RMbA9wEv481DbwZGNeWeLgqmjGZrgESJ99qTxpUJ
 Relying-party account closed successful!
