@@ -33,7 +33,7 @@ Velas's programming model and the definitions of the Velas terms used in this do
 Install devtools:
 
 ```bash
-sudo apt install build-essential libcurl4-gnutls-dev libxml2-dev libssl-dev
+sudo apt install build-essential libcurl4-gnutls-dev libxml2-dev libssl-dev libudev-dev
 ```
 
 #### MacOS & Linux
@@ -47,7 +47,7 @@ sudo apt install build-essential libcurl4-gnutls-dev libxml2-dev libssl-dev
 Install the package from the [crates](https://crates.io/crates/libc) through `cargo`:
 
 ```bash
-$ git clone https://github.com/velas/velas-program-library.git && cargo install --path velas-program-library/relying-party/cli
+$ cargo install vpl-relying-party-cli
 ```
 
 ## Usage
