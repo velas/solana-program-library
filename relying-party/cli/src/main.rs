@@ -1,36 +1,37 @@
 use {
+    borsh::{BorshDeserialize, BorshSerialize},
+    cid::Cid,
     clap::{
-        crate_description, crate_name, crate_version, value_t, value_t_or_exit, App, AppSettings, Arg,
-        SubCommand,
+        crate_description, crate_name, crate_version, value_t, value_t_or_exit, App, AppSettings,
+        Arg, SubCommand,
     },
     solana_clap_utils::{
         input_parsers::pubkey_of,
-        input_validators::{is_keypair, is_url, is_valid_pubkey, is_amount},
+        input_validators::{is_amount, is_keypair, is_url, is_valid_pubkey},
     },
     solana_client::rpc_client::RpcClient,
     solana_sdk::{
         commitment_config::CommitmentConfig,
+        hash::Hasher,
+        native_token::lamports_to_sol,
         pubkey::Pubkey,
         signature::{read_keypair_file, Keypair, Signer},
-        transaction::Transaction,
-        hash::Hasher,
         system_instruction,
-        native_token::lamports_to_sol,
+        transaction::Transaction,
     },
-    vpl_relying_party::{
-        state::{RelyingPartyData, RelatedProgramInfo},
-        id,
-    },
-    borsh::{BorshDeserialize, BorshSerialize},
     std::cmp::min,
-    cid::Cid,
     std::convert::TryFrom,
+    vpl_relying_party::{
+        id,
+        state::{RelatedProgramInfo, RelyingPartyData},
+    },
 };
 
 struct Config {
     fee_payer: Keypair,
     authority: Keypair,
     json_rpc_url: String,
+    #[allow(dead_code)] // TODO: Add in new version
     verbose: bool,
     dry_run: bool,
 }
@@ -64,7 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .global(true)
                 .help("Configuration file to use");
             if let Some(ref config_file) = *solana_cli_config::CONFIG_FILE {
-                arg.default_value(&config_file)
+                arg.default_value(config_file)
             } else {
                 arg
             }
@@ -103,9 +104,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .takes_value(true)
                 .global(true)
                 .help(
-                    "Filepath or URL to a relying-party authority keypair. \
-                    Relying-party authority needs to close the account. \
-                    [default: client keypair]",
+                    "Filepath or URL to current relying-party authority keypair. [default: client keypair]",
                 ),
         )
         .subcommand(
@@ -117,7 +116,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .validator(is_valid_pubkey)
                         .index(1)
                         .required(true)
-                        .help("The address of the relying-party account"),
+                        .help("Address of the relying-party account"),
                 ),
         )
         .subcommand(
@@ -130,7 +129,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .validator(is_valid_program_name)
                         .index(1)
                         .required(true)
-                        .help("The program name that associated with relying-party account"),
+                        .help("The display name associated with relying-party account"),
                 )
                 .arg(
                     Arg::with_name("program_icon_cid")
@@ -140,8 +139,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .index(2)
                         .required(true)
                         .help(
-                            "Content identifier to the associated with relying-party program. \
-                            https://docs.ipfs.io/concepts/content-addressing/"    
+                            "Content identifier of the icon associated with relying-party account: https://docs.ipfs.io/concepts/content-addressing/",
                         ),
                 )
                 .arg(
@@ -151,7 +149,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .validator(is_url)
                         .index(3)
                         .required(true)
-                        .help("Domain name of the associated with relying-party program"),
+                        .help("Domain name associated with relying-party account"),
                 )
                 .arg(
                     Arg::with_name("program_redirect_uris")
@@ -162,7 +160,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .required(true)
                         .multiple(true)
                         .min_values(1)
-                        .help("Allowed redirect URIs for Vaccount"),
+                        .help("Allowed URIs for end-user to be redirected to"),
                 )
                 .arg(
                     Arg::with_name("lamports")
@@ -170,7 +168,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .value_name("AMOUNT")
                         .validator(is_amount)
                         .help("Lamports to create a new relying-party account"),
-                )
+                ),
         )
         .subcommand(
             SubCommand::with_name("set-authority")
@@ -188,8 +186,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .value_name("NEW_AUTHORITY_ADDRESS")
                         .validator(is_valid_pubkey)
                         .required(true)
-                        .help("The new authority of the relying-party account"),
-                )
+                        .help("New authority of the relying-party account"),
+                ),
         )
         .subcommand(
             SubCommand::with_name("close-account")
@@ -208,7 +206,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .validator(is_valid_pubkey)
                         .required(true)
                         .help("The address to send lamports from relying-party"),
-                )
+                ),
         )
         .get_matches();
 
@@ -235,7 +233,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             authority: read_keypair_file(
                 matches
                     .value_of("authority")
-                    .unwrap_or(&cli_config.keypair_path)
+                    .unwrap_or(&cli_config.keypair_path),
             )?,
             verbose: matches.is_present("verbose"),
             dry_run: matches.is_present("dry_run"),
@@ -248,13 +246,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match (sub_command, sub_matches) {
         ("account", Some(arg_matches)) => {
             let relying_party_address = pubkey_of(arg_matches, "relying_party").unwrap();
-            let relying_party_data = get_relying_party_account(&rpc_client, &relying_party_address)?;
+            let relying_party_data =
+                get_relying_party_account(&rpc_client, &relying_party_address)?;
             let icon_cid = Cid::try_from(relying_party_data.related_program_data.icon_cid)?;
 
             println!("\nPublic Key: {}", relying_party_address);
             println!("-------------------------------------------------------------------");
 
-            println!("Relying Party Data:\n    \
+            println!(
+                "Relying Party Data:\n    \
                     version: {}\n    \
                     authority: {}\n    \
                     Releted program data:\n        \
@@ -262,13 +262,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     icon_cid: {}\n        \
                     domain_name: {}\n        \
                     redirect_uri: {:?}\n",
-                    relying_party_data.version,
-                    relying_party_data.authority,
-                    relying_party_data.related_program_data.name,
-                    icon_cid.to_string(),
-                    relying_party_data.related_program_data.domain_name,
-                    relying_party_data.related_program_data.redirect_uri,
-                );
+                relying_party_data.version,
+                relying_party_data.authority,
+                relying_party_data.related_program_data.name,
+                icon_cid.to_string(),
+                relying_party_data.related_program_data.domain_name,
+                relying_party_data.related_program_data.redirect_uri,
+            );
 
             Ok(())
         }
@@ -276,7 +276,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let program_name = value_t_or_exit!(arg_matches, "program_name", String);
             let program_icon_cid = value_t_or_exit!(arg_matches, "program_icon_cid", String);
             let program_domain_name = value_t_or_exit!(arg_matches, "program_domain_name", String);
-            let program_redirect_uris: Vec<_> = arg_matches.values_of("program_redirect_uris").unwrap().collect();     
+            let program_redirect_uris: Vec<_> = arg_matches
+                .values_of("program_redirect_uris")
+                .unwrap()
+                .map(|s| s.to_string())
+                .collect();
             let lamports = value_t!(arg_matches, "lamports", u64);
 
             process_initialize(
@@ -286,31 +290,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &program_name,
                 &program_icon_cid,
                 &program_domain_name,
-                &program_redirect_uris.iter().map(|s| s.to_string()).collect(),
-                if lamports.is_ok() {Some(lamports.unwrap())} else {None},
+                program_redirect_uris.as_slice(),
+                lamports.ok(),
             )
         }
         ("set-authority", Some(arg_matches)) => {
             let relying_party_address = pubkey_of(arg_matches, "relying_party").unwrap();
             let new_authority = pubkey_of(arg_matches, "new_authority").unwrap();
 
-            process_set_authority(
-                &rpc_client,
-                &config,
-                &relying_party_address,
-                &new_authority,
-            )
+            process_set_authority(&rpc_client, &config, &relying_party_address, &new_authority)
         }
         ("close-account", Some(arg_matches)) => {
             let relying_party_address = pubkey_of(arg_matches, "relying_party").unwrap();
             let receiver = pubkey_of(arg_matches, "receiver").unwrap();
 
-            process_close_account(
-                &rpc_client,
-                &config,
-                &relying_party_address,
-                &receiver,
-            )
+            process_close_account(&rpc_client, &config, &relying_party_address, &receiver)
         }
         _ => unreachable!(),
     }
@@ -342,10 +336,10 @@ fn get_relying_party_account(
 }
 
 fn get_relying_party_address(
-    program_name: &String,
-    program_icon_cid: &String,
-    program_domain_name: &String,
-    program_redirect_uris: &Vec<String>,
+    program_name: &str,
+    program_icon_cid: &str,
+    program_domain_name: &str,
+    program_redirect_uris: &[String],
 ) -> (Pubkey, u8) {
     let mut hasher = Hasher::default();
     for uri in program_redirect_uris.iter() {
@@ -366,21 +360,21 @@ fn get_relying_party_address(
 
 fn get_min_required_lamports(
     rpc_client: &RpcClient,
-    authority_address: &Pubkey, 
-    program_name: &String, 
-    program_icon_cid: Vec<u8>, 
-    program_domain_name: &String, 
-    program_redirect_uris: Vec<String>
+    authority_address: &Pubkey,
+    program_name: &str,
+    program_icon_cid: Vec<u8>,
+    program_domain_name: &str,
+    program_redirect_uris: Vec<String>,
 ) -> Result<u64, String> {
     let relying_party_data = RelyingPartyData {
         version: 1,
         authority: *authority_address,
         related_program_data: RelatedProgramInfo {
-            name: program_name.clone(),
-            domain_name: program_domain_name.clone(),
+            name: program_name.to_string(),
+            domain_name: program_domain_name.to_string(),
             icon_cid: program_icon_cid,
-            redirect_uri: program_redirect_uris.clone()
-        }
+            redirect_uri: program_redirect_uris,
+        },
     };
 
     let relying_party_data_size = relying_party_data.try_to_vec().unwrap().len();
@@ -389,47 +383,40 @@ fn get_min_required_lamports(
         .map_err(|err| err.to_string())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn process_initialize(
     rpc_client: &RpcClient,
     config: &Config,
     authority_address: &Pubkey,
-    program_name: &String,
-    program_icon_cid: &String,
-    program_domain_name: &String,
-    program_redirect_uris: &Vec<String>,
+    program_name: &str,
+    program_icon_cid: &str,
+    program_domain_name: &str,
+    program_redirect_uris: &[String],
     lamports: Option<u64>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let program_icon_cid_decoded = Cid::try_from(program_icon_cid.clone());
-    if !program_icon_cid_decoded.is_ok() {
-        return Err(format!(
-            "Unable to parse icon cid: {}", 
-            &program_icon_cid).into()
-        );
+    let program_icon_cid_decoded = Cid::try_from(program_icon_cid);
+    if program_icon_cid_decoded.is_err() {
+        return Err(format!("Unable to parse icon cid: {}", &program_icon_cid).into());
     }
 
     let min_required_lamports = get_min_required_lamports(
-        &rpc_client,
-        authority_address, 
-        program_name, 
-        program_icon_cid_decoded.unwrap().to_bytes(), 
-        program_domain_name, 
-        program_redirect_uris.to_vec()
+        rpc_client,
+        authority_address,
+        program_name,
+        program_icon_cid_decoded.unwrap().to_bytes(),
+        program_domain_name,
+        program_redirect_uris.to_owned(),
     )?;
 
-    let lamports = if lamports.is_some() {
-        let lamports = lamports.unwrap();
-
+    let lamports = if let Some(lamports) = lamports {
         if lamports < min_required_lamports {
-            return Err(format!(
-                "Need at least {} lamports",
-                min_required_lamports
-            )
-            .into());
+            return Err(format!("Need at least {} lamports", min_required_lamports).into());
         }
 
         lamports
-    
-    } else { min_required_lamports };
+    } else {
+        min_required_lamports
+    };
 
     let balance = rpc_client.get_balance(&config.fee_payer.pubkey())?;
     if balance < lamports {
@@ -443,13 +430,13 @@ fn process_initialize(
     }
 
     let (relying_party_address, bump_seed_nonce) = get_relying_party_address(
-        &program_name,
-        &program_icon_cid,
-        &program_domain_name,
-        &program_redirect_uris,
+        program_name,
+        program_icon_cid,
+        program_domain_name,
+        program_redirect_uris,
     );
 
-    if get_relying_party_account(&rpc_client, &relying_party_address).is_ok() {
+    if get_relying_party_account(rpc_client, &relying_party_address).is_ok() {
         return Err(format!(
             "Relying Party Account {} already exists",
             &relying_party_address,
@@ -460,17 +447,17 @@ fn process_initialize(
     let mut initialize_transaction = Transaction::new_with_payer(
         &[
             system_instruction::transfer(
-                &config.fee_payer.pubkey(), 
-                &relying_party_address, 
-                lamports
+                &config.fee_payer.pubkey(),
+                &relying_party_address,
+                lamports,
             ),
             vpl_relying_party::instruction::initialize(
                 &relying_party_address,
                 authority_address,
-                program_name.clone(),
-                program_icon_cid.clone(),
-                program_domain_name.clone(),
-                program_redirect_uris.clone(),
+                program_name.to_string(),
+                program_icon_cid.to_string(),
+                program_domain_name.to_string(),
+                program_redirect_uris.to_vec(),
                 bump_seed_nonce,
             ),
         ],
@@ -480,7 +467,7 @@ fn process_initialize(
     let blockhash = rpc_client.get_recent_blockhash()?.0;
     initialize_transaction.try_sign(&[&config.fee_payer], blockhash)?;
 
-    send_transaction(&rpc_client, &config, initialize_transaction)?;
+    send_transaction(rpc_client, config, initialize_transaction)?;
 
     println!("Relying Party Address: {}", relying_party_address);
     println!("Created!");
@@ -493,7 +480,7 @@ fn process_set_authority(
     relying_party_address: &Pubkey,
     new_authority_address: &Pubkey,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let relying_party_account = get_relying_party_account(&rpc_client, &relying_party_address)?;
+    let relying_party_account = get_relying_party_account(rpc_client, relying_party_address)?;
 
     if config.authority.pubkey() != relying_party_account.authority {
         return Err(format!(
@@ -508,22 +495,24 @@ fn process_set_authority(
     }
 
     let mut set_authority_transaction = Transaction::new_with_payer(
-        &[
-            vpl_relying_party::instruction::set_authority(
-                relying_party_address, 
-                &config.authority.pubkey(), 
-                new_authority_address,
-            ),
-        ],
+        &[vpl_relying_party::instruction::set_authority(
+            relying_party_address,
+            &config.authority.pubkey(),
+            new_authority_address,
+        )],
         Some(&config.fee_payer.pubkey()),
     );
 
     let blockhash = rpc_client.get_recent_blockhash()?.0;
     set_authority_transaction.try_sign(&[&config.fee_payer, &config.authority], blockhash)?;
 
-    send_transaction(&rpc_client, &config, set_authority_transaction)?;
+    send_transaction(rpc_client, config, set_authority_transaction)?;
 
-    println!("Authority changed from {} to {} successful!", config.authority.pubkey(), new_authority_address);
+    println!(
+        "Authority changed from {} to {} successful!",
+        config.authority.pubkey(),
+        new_authority_address
+    );
     Ok(())
 }
 
@@ -533,7 +522,7 @@ fn process_close_account(
     relying_party_address: &Pubkey,
     receiver: &Pubkey,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let relying_party_account = get_relying_party_account(&rpc_client, &relying_party_address)?;
+    let relying_party_account = get_relying_party_account(rpc_client, relying_party_address)?;
 
     if config.authority.pubkey() != relying_party_account.authority {
         return Err(format!(
@@ -548,27 +537,24 @@ fn process_close_account(
     }
 
     let mut close_account_transaction = Transaction::new_with_payer(
-        &[
-            vpl_relying_party::instruction::close_account(
-                relying_party_address, 
-                &config.authority.pubkey(), 
-                receiver,
-            ),
-        ],
+        &[vpl_relying_party::instruction::close_account(
+            relying_party_address,
+            &config.authority.pubkey(),
+            receiver,
+        )],
         Some(&config.fee_payer.pubkey()),
     );
 
     let blockhash = rpc_client.get_recent_blockhash()?.0;
     close_account_transaction.try_sign(&[&config.fee_payer, &config.authority], blockhash)?;
 
-    send_transaction(&rpc_client, &config, close_account_transaction)?;
+    send_transaction(rpc_client, config, close_account_transaction)?;
 
     println!("Relying-party account closed successful!");
     Ok(())
 }
 
-pub fn is_valid_cid(cid: String) -> Result<(), String>
-{   
+pub fn is_valid_cid(cid: String) -> Result<(), String> {
     let icon_cid = Cid::try_from(cid.clone());
     if icon_cid.is_ok() {
         Ok(())
@@ -580,15 +566,11 @@ pub fn is_valid_cid(cid: String) -> Result<(), String>
     }
 }
 
-pub fn is_valid_program_name(name: String) -> Result<(), String>
-{
+pub fn is_valid_program_name(name: String) -> Result<(), String> {
     let is_valid_name = name.chars().any(|c| c.is_ascii());
     if is_valid_name {
         Ok(())
     } else {
-        Err(format!(
-            "Invalid `program-name`: {}",
-            &name
-        ))
+        Err(format!("Invalid `program-name`: {}", &name))
     }
 }

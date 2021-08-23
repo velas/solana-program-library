@@ -78,7 +78,7 @@
 //                 1.max(Rent::default().minimum_balance(space)),
 //             ),
 //             instruction::initialize(
-//                 &relying_party, 
+//                 &relying_party,
 //                 &authority.pubkey(),
 //                 &related_program,
 //                 program_name.clone(),
@@ -107,7 +107,7 @@
 //         "https://wallet.velas.com/".to_string(),
 //     ];
 
-//     let (relying_party_address, bump_seed_nonce) = get_relying_party_address(    
+//     let (relying_party_address, bump_seed_nonce) = get_relying_party_address(
 //         &program_name,
 //         program_icon_cid,
 //         &program_domain_name,
@@ -132,7 +132,7 @@
 //     };
 
 //     initialize_relying_party_account(
-//         &mut context, 
+//         &mut context,
 //         &relying_party_address,
 //         &authority,
 //         &related_program.pubkey(),
@@ -176,7 +176,7 @@
 //         "https://wallet.velas.com/".to_string(),
 //     ];
 
-//     let (relying_party_address, bump_seed_nonce) = get_relying_party_address(    
+//     let (relying_party_address, bump_seed_nonce) = get_relying_party_address(
 //         &program_name,
 //         program_icon_cid,
 //         &program_domain_name,
@@ -201,7 +201,7 @@
 //     };
 
 //     initialize_relying_party_account(
-//         &mut context, 
+//         &mut context,
 //         &relying_party_address,
 //         &authority,
 //         &related_program.pubkey(),
@@ -223,7 +223,7 @@
 //                 1.max(Rent::default().minimum_balance(get_instance_packed_len(&relying_party_data).unwrap())),
 //             ),
 //             instruction::initialize(
-//                 &relying_party_address, 
+//                 &relying_party_address,
 //                 &authority.pubkey(),
 //                 &related_program.pubkey(),
 //                 program_name.clone(),
@@ -261,7 +261,7 @@
 //         "https://wallet.velas.com/".to_string(),
 //     ];
 
-//     let (relying_party_address, bump_seed_nonce) = get_relying_party_address(    
+//     let (relying_party_address, bump_seed_nonce) = get_relying_party_address(
 //         &program_name,
 //         program_icon_cid,
 //         &program_domain_name,
@@ -287,7 +287,7 @@
 //     };
 
 //     initialize_relying_party_account(
-//         &mut context, 
+//         &mut context,
 //         &relying_party_address,
 //         &authority,
 //         &related_program.pubkey(),
@@ -341,7 +341,7 @@
 //         "https://wallet.velas.com/".to_string(),
 //     ];
 
-//     let (relying_party_address, bump_seed_nonce) = get_relying_party_address(    
+//     let (relying_party_address, bump_seed_nonce) = get_relying_party_address(
 //         &program_name,
 //         program_icon_cid,
 //         &program_domain_name,
@@ -368,7 +368,7 @@
 //     };
 
 //     initialize_relying_party_account(
-//         &mut context, 
+//         &mut context,
 //         &relying_party_address,
 //         &authority,
 //         &related_program.pubkey(),
@@ -419,7 +419,7 @@
 //         "https://wallet.velas.com/".to_string(),
 //     ];
 
-//     let (relying_party_address, bump_seed_nonce) = get_relying_party_address(    
+//     let (relying_party_address, bump_seed_nonce) = get_relying_party_address(
 //         &program_name,
 //         program_icon_cid,
 //         &program_domain_name,
@@ -446,7 +446,7 @@
 //     };
 
 //     initialize_relying_party_account(
-//         &mut context, 
+//         &mut context,
 //         &relying_party_address,
 //         &authority,
 //         &related_program.pubkey(),

@@ -3272,6 +3272,19 @@ dependencies = [
 
 [[package]]
 name = "solana-cli-config"
+version = "1.6.14"
+source = "git+https://github.com/velas/velas-chain/#ba7be7bffe053c7306bed249fa40df1c1b25eed7"
+dependencies = [
+ "dirs-next",
+ "lazy_static",
+ "serde",
+ "serde_derive",
+ "serde_yaml",
+ "url",
+]
+
+[[package]]
+name = "solana-cli-config"
 version = "1.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8de306774cb10f8385c0f47f0315b16236d84a28bb25eaf87dfe4eb9c736f94"
@@ -3395,7 +3408,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "solana-clap-utils",
- "solana-cli-config",
+ "solana-cli-config 1.7.7",
  "solana-logger",
  "solana-metrics",
  "solana-sdk",
@@ -3917,7 +3930,7 @@ dependencies = [
  "chrono",
  "clap",
  "solana-clap-utils",
- "solana-cli-config",
+ "solana-cli-config 1.7.7",
  "solana-client",
  "solana-logger",
  "solana-sdk",
@@ -4050,7 +4063,7 @@ dependencies = [
  "serde_json",
  "solana-account-decoder",
  "solana-clap-utils",
- "solana-cli-config",
+ "solana-cli-config 1.7.7",
  "solana-client",
  "solana-logger",
  "solana-program",
@@ -4099,7 +4112,7 @@ dependencies = [
  "serde_json",
  "solana-account-decoder",
  "solana-clap-utils",
- "solana-cli-config",
+ "solana-cli-config 1.7.7",
  "solana-cli-output",
  "solana-client",
  "solana-logger",
@@ -4138,7 +4151,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "solana-clap-utils",
- "solana-cli-config",
+ "solana-cli-config 1.7.7",
  "solana-client",
  "solana-logger",
  "solana-program",
@@ -4904,14 +4917,14 @@ dependencies = [
 
 [[package]]
 name = "vpl-relying-party-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "borsh",
  "cid",
  "clap",
  "multihash 0.10.1",
  "solana-clap-utils",
- "solana-cli-config",
+ "solana-cli-config 1.6.14",
  "solana-client",
  "solana-logger",
  "solana-sdk",
