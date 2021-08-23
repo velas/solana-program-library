@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "associated-token-account/program",
+  "binary-option/program",
   "binary-oracle-pair/program",
   "examples/rust/cross-program-invocation",
   "examples/rust/custom-heap",
@@ -27,6 +28,7 @@ members = [
   "token/program",
   "utils/cgen",
   "utils/test-client",
+  "token-lending/flash_loan_receiver",
 ]
 exclude = [
   "themis/client_ristretto",

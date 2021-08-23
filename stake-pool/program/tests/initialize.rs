@@ -85,7 +85,7 @@ async fn success() {
     .await;
     let validator_list =
         try_from_slice_unchecked::<state::ValidatorList>(validator_list.data.as_slice()).unwrap();
-    assert!(validator_list.is_valid());
+    assert!(validator_list.header.is_valid());
 }
 
 #[tokio::test]
@@ -177,6 +177,34 @@ async fn fail_with_high_fee() {
 }
 
 #[tokio::test]
+async fn fail_with_high_withdrawal_fee() {
+    let (mut banks_client, payer, recent_blockhash) = program_test().start().await;
+    let mut stake_pool_accounts = StakePoolAccounts::new();
+    stake_pool_accounts.withdrawal_fee = state::Fee {
+        numerator: 100_001,
+        denominator: 100_000,
+    };
+
+    let transaction_error = stake_pool_accounts
+        .initialize_stake_pool(&mut banks_client, &payer, &recent_blockhash, 1)
+        .await
+        .err()
+        .unwrap();
+    match transaction_error {
+        TransportError::TransactionError(TransactionError::InstructionError(
+            _,
+            InstructionError::Custom(error_index),
+        )) => {
+            let program_error = error::StakePoolError::FeeTooHigh as u32;
+            assert_eq!(error_index, program_error);
+        }
+        _ => {
+            panic!("Wrong error occurs while try to initialize stake pool with high withdrawal fee")
+        }
+    }
+}
+
+#[tokio::test]
 async fn fail_with_wrong_max_validators() {
     let (mut banks_client, payer, recent_blockhash) = program_test().start().await;
     let stake_pool_accounts = StakePoolAccounts::new();
@@ -225,6 +253,9 @@ async fn fail_with_wrong_max_validators() {
                 &spl_token::id(),
                 None,
                 stake_pool_accounts.fee,
+                stake_pool_accounts.withdrawal_fee,
+                stake_pool_accounts.deposit_fee,
+                stake_pool_accounts.referral_fee,
                 stake_pool_accounts.max_validators,
             ),
         ],
@@ -295,6 +326,11 @@ async fn fail_with_wrong_mint_authority() {
         &stake_pool_accounts.staker.pubkey(),
         &None,
         &stake_pool_accounts.fee,
+        &stake_pool_accounts.withdrawal_fee,
+        &stake_pool_accounts.deposit_fee,
+        stake_pool_accounts.referral_fee,
+        &stake_pool_accounts.sol_deposit_fee,
+        stake_pool_accounts.sol_referral_fee,
         stake_pool_accounts.max_validators,
     )
     .await
@@ -380,6 +416,11 @@ async fn fail_with_freeze_authority() {
         &stake_pool_accounts.staker.pubkey(),
         &None,
         &stake_pool_accounts.fee,
+        &stake_pool_accounts.withdrawal_fee,
+        &stake_pool_accounts.deposit_fee,
+        stake_pool_accounts.referral_fee,
+        &stake_pool_accounts.sol_deposit_fee,
+        stake_pool_accounts.sol_referral_fee,
         stake_pool_accounts.max_validators,
     )
     .await
@@ -467,6 +508,9 @@ async fn fail_with_wrong_token_program_id() {
                 &wrong_token_program.pubkey(),
                 None,
                 stake_pool_accounts.fee,
+                stake_pool_accounts.withdrawal_fee,
+                stake_pool_accounts.deposit_fee,
+                stake_pool_accounts.referral_fee,
                 stake_pool_accounts.max_validators,
             ),
         ],
@@ -543,6 +587,11 @@ async fn fail_with_wrong_fee_account() {
         &stake_pool_accounts.staker.pubkey(),
         &None,
         &stake_pool_accounts.fee,
+        &stake_pool_accounts.withdrawal_fee,
+        &stake_pool_accounts.deposit_fee,
+        stake_pool_accounts.referral_fee,
+        &stake_pool_accounts.sol_deposit_fee,
+        stake_pool_accounts.sol_referral_fee,
         stake_pool_accounts.max_validators,
     )
     .await
@@ -631,6 +680,9 @@ async fn fail_with_not_rent_exempt_pool() {
                 &spl_token::id(),
                 None,
                 stake_pool_accounts.fee,
+                stake_pool_accounts.withdrawal_fee,
+                stake_pool_accounts.deposit_fee,
+                stake_pool_accounts.referral_fee,
                 stake_pool_accounts.max_validators,
             ),
         ],
@@ -705,6 +757,9 @@ async fn fail_with_not_rent_exempt_validator_list() {
                 &spl_token::id(),
                 None,
                 stake_pool_accounts.fee,
+                stake_pool_accounts.withdrawal_fee,
+                stake_pool_accounts.deposit_fee,
+                stake_pool_accounts.referral_fee,
                 stake_pool_accounts.max_validators,
             ),
         ],
@@ -756,6 +811,9 @@ async fn fail_without_manager_signature() {
 
     let init_data = instruction::StakePoolInstruction::Initialize {
         fee: stake_pool_accounts.fee,
+        withdrawal_fee: stake_pool_accounts.withdrawal_fee,
+        deposit_fee: stake_pool_accounts.deposit_fee,
+        referral_fee: stake_pool_accounts.referral_fee,
         max_validators: stake_pool_accounts.max_validators,
     };
     let data = init_data.try_to_vec().unwrap();
@@ -877,6 +935,11 @@ async fn fail_with_pre_minted_pool_tokens() {
         &stake_pool_accounts.staker.pubkey(),
         &None,
         &stake_pool_accounts.fee,
+        &stake_pool_accounts.withdrawal_fee,
+        &stake_pool_accounts.deposit_fee,
+        stake_pool_accounts.referral_fee,
+        &stake_pool_accounts.sol_deposit_fee,
+        stake_pool_accounts.sol_referral_fee,
         stake_pool_accounts.max_validators,
     )
     .await
@@ -938,6 +1001,11 @@ async fn fail_with_bad_reserve() {
             &stake_pool_accounts.staker.pubkey(),
             &None,
             &stake_pool_accounts.fee,
+            &stake_pool_accounts.withdrawal_fee,
+            &stake_pool_accounts.deposit_fee,
+            stake_pool_accounts.referral_fee,
+            &stake_pool_accounts.sol_deposit_fee,
+            stake_pool_accounts.sol_referral_fee,
             stake_pool_accounts.max_validators,
         )
         .await
@@ -983,6 +1051,11 @@ async fn fail_with_bad_reserve() {
             &stake_pool_accounts.staker.pubkey(),
             &None,
             &stake_pool_accounts.fee,
+            &stake_pool_accounts.withdrawal_fee,
+            &stake_pool_accounts.deposit_fee,
+            stake_pool_accounts.referral_fee,
+            &stake_pool_accounts.sol_deposit_fee,
+            stake_pool_accounts.sol_referral_fee,
             stake_pool_accounts.max_validators,
         )
         .await
@@ -1031,6 +1104,11 @@ async fn fail_with_bad_reserve() {
             &stake_pool_accounts.staker.pubkey(),
             &None,
             &stake_pool_accounts.fee,
+            &stake_pool_accounts.withdrawal_fee,
+            &stake_pool_accounts.deposit_fee,
+            stake_pool_accounts.referral_fee,
+            &stake_pool_accounts.sol_deposit_fee,
+            stake_pool_accounts.sol_referral_fee,
             stake_pool_accounts.max_validators,
         )
         .await
@@ -1079,6 +1157,11 @@ async fn fail_with_bad_reserve() {
             &stake_pool_accounts.staker.pubkey(),
             &None,
             &stake_pool_accounts.fee,
+            &stake_pool_accounts.withdrawal_fee,
+            &stake_pool_accounts.deposit_fee,
+            stake_pool_accounts.referral_fee,
+            &stake_pool_accounts.sol_deposit_fee,
+            stake_pool_accounts.sol_referral_fee,
             stake_pool_accounts.max_validators,
         )
         .await
@@ -1097,10 +1180,11 @@ async fn fail_with_bad_reserve() {
 }
 
 #[tokio::test]
-async fn success_with_required_deposit_authority() {
+async fn success_with_required_stake_deposit_authority() {
     let (mut banks_client, payer, recent_blockhash) = program_test().start().await;
-    let deposit_authority = Keypair::new();
-    let stake_pool_accounts = StakePoolAccounts::new_with_deposit_authority(deposit_authority);
+    let stake_deposit_authority = Keypair::new();
+    let stake_pool_accounts =
+        StakePoolAccounts::new_with_stake_deposit_authority(stake_deposit_authority);
     stake_pool_accounts
         .initialize_stake_pool(&mut banks_client, &payer, &recent_blockhash, 1)
         .await
@@ -1112,7 +1196,7 @@ async fn success_with_required_deposit_authority() {
     let stake_pool =
         try_from_slice_unchecked::<state::StakePool>(stake_pool_account.data.as_slice()).unwrap();
     assert_eq!(
-        stake_pool.deposit_authority,
-        stake_pool_accounts.deposit_authority
+        stake_pool.stake_deposit_authority,
+        stake_pool_accounts.stake_deposit_authority
     );
 }
