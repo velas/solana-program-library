@@ -25,14 +25,14 @@ pub struct RelatedProgramInfo {
     /// Domain name of the related program
     pub domain_name: String,
     /// Allowed redirect URI for Vaccount in program
-    pub redirect_uri: Vec<String>
+    pub redirect_uri: Vec<String>,
 }
 
 impl RelatedProgramInfo {
     /// https://en.wikipedia.org/wiki/Domain_name#Domain_name_syntax
     pub const MAX_DOMAIN_LEN: u8 = 253;
     /// Is valid domain name
-    pub fn is_valid_domain_name(domain_name: &String) -> bool {
+    pub fn is_valid_domain_name(domain_name: &str) -> bool {
         if domain_name.len() > Self::MAX_DOMAIN_LEN as usize {
             return false;
         }
@@ -69,7 +69,7 @@ pub mod tests {
         let bs58_cid = "QmdfTbBqBPQ7VNxZEYEj14VmRuZBkqFbiwReogJgS1zR1n";
         let cid = Cid::try_from(bs58_cid).unwrap().to_bytes();
 
-        let related_program_data: RelatedProgramInfo = RelatedProgramInfo {
+        let program_data: RelatedProgramInfo = RelatedProgramInfo {
             name: String::from("test_program"),
             icon_cid: cid,
             domain_name: String::from("http://localhost:8989/"),
@@ -82,7 +82,7 @@ pub mod tests {
         let relying_party_data: RelyingPartyData = RelyingPartyData {
             version: TEST_VERSION,
             authority: TEST_AUTHORITY_PUBKEY,
-            related_program_data: related_program_data,
+            related_program_data: program_data,
         };
 
         let packed = relying_party_data.try_to_vec().unwrap();

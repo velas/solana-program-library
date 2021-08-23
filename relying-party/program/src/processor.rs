@@ -1,30 +1,29 @@
 //! Program state processor
 
 use crate::{
-        error::RelyingParty,
-        instruction::RelyingPartyInstruction,
-        state::{RelyingPartyData, RelatedProgramInfo},
-        id,
-        borsh_utils::get_instance_packed_len,
+    borsh_utils::get_instance_packed_len,
+    error::RelyingParty,
+    id,
+    instruction::RelyingPartyInstruction,
+    state::{RelatedProgramInfo, RelyingPartyData},
 };
 use borsh::{BorshDeserialize, BorshSerialize};
+use cid::Cid;
 use solana_program::{
-        account_info::{next_account_info, AccountInfo},
-        entrypoint::ProgramResult,
-        msg,
-        hash::{Hasher, Hash},
-        program_error::ProgramError,
-        program_pack::IsInitialized,
-        pubkey::Pubkey,
-        program::invoke_signed,
-        rent::Rent,
-        sysvar::Sysvar,
-        system_instruction,
+    account_info::{next_account_info, AccountInfo},
+    entrypoint::ProgramResult,
+    hash::{Hash, Hasher},
+    msg,
+    program::invoke_signed,
+    program_error::ProgramError,
+    program_pack::IsInitialized,
+    pubkey::Pubkey,
+    rent::Rent,
+    system_instruction,
+    sysvar::Sysvar,
 };
 use std::cmp::min;
-use cid::Cid;
 use std::convert::TryFrom;
-
 
 fn check_authority(authority_info: &AccountInfo, expected_authority: &Pubkey) -> ProgramResult {
     if expected_authority != authority_info.key {
@@ -39,7 +38,7 @@ fn check_authority(authority_info: &AccountInfo, expected_authority: &Pubkey) ->
     Ok(())
 }
 
-fn get_redirect_uris_hash(program_redirect_uris: &Vec<String>,) -> Hash {
+fn get_redirect_uris_hash(program_redirect_uris: &[String]) -> Hash {
     let mut hasher = Hasher::default();
     for uri in program_redirect_uris.iter() {
         hasher.hash(uri.as_bytes());
@@ -48,11 +47,11 @@ fn get_redirect_uris_hash(program_redirect_uris: &Vec<String>,) -> Hash {
 }
 
 fn check_relying_party_address(
-    relying_party_address: &Pubkey, 
-    program_name: &String, 
-    program_icon_cid: &String, 
-    program_domain_name: &String, 
-    program_redirect_uris: &Vec<String>,
+    relying_party_address: &Pubkey,
+    program_name: &str,
+    program_icon_cid: &str,
+    program_domain_name: &str,
+    program_redirect_uris: &[String],
     seed_nonce: &u8,
 ) -> ProgramResult {
     let relying_party_seed = [
@@ -62,7 +61,8 @@ fn check_relying_party_address(
         &get_redirect_uris_hash(program_redirect_uris).to_bytes()[..32],
         &[*seed_nonce],
     ];
-    let expected_relying_party_address = Pubkey::create_program_address(&relying_party_seed, &id())?;
+    let expected_relying_party_address =
+        Pubkey::create_program_address(&relying_party_seed, &id())?;
 
     if expected_relying_party_address != *relying_party_address {
         return Err(RelyingParty::InvalidRelyingPartyAddress.into());
@@ -81,15 +81,21 @@ pub fn process_instruction(
     let account_info_iter = &mut accounts.iter();
 
     match instruction {
-        RelyingPartyInstruction::Initialize{ program_name, program_icon_cid, program_domain_name, program_redirect_uri, bump_seed_nonce } => {
+        RelyingPartyInstruction::Initialize {
+            program_name,
+            program_icon_cid,
+            program_domain_name,
+            program_redirect_uri,
+            bump_seed_nonce,
+        } => {
             msg!("RelyingPartyInstruction::Initialize");
+            let icon_content_id =
+                if let Ok(icon_content_id) = Cid::try_from(program_icon_cid.clone()) {
+                    icon_content_id.to_bytes()
+                } else {
+                    return Err(RelyingParty::InvalidIconCID.into());
+                };
 
-            let icon_cid = Cid::try_from(program_icon_cid.clone());
-            if !icon_cid.is_ok() {
-                return Err(RelyingParty::InvalidIconCID.into())
-            }
-            let icon_cid = icon_cid.unwrap().to_bytes();
-        
             let relying_party_info = next_account_info(account_info_iter)?;
             let authority_info = next_account_info(account_info_iter)?;
             // Rent sysvar account
@@ -99,31 +105,32 @@ pub fn process_instruction(
             let system_program_info = next_account_info(account_info_iter)?;
 
             if !relying_party_info.data_is_empty() {
-                return Err(ProgramError::InvalidAccountData)
+                return Err(ProgramError::InvalidAccountData);
             }
 
             check_relying_party_address(
-                relying_party_info.key, 
-                &program_name, 
-                &program_icon_cid, 
-                &program_domain_name, 
-                &program_redirect_uri, 
-                &bump_seed_nonce
+                relying_party_info.key,
+                &program_name,
+                &program_icon_cid,
+                &program_domain_name,
+                &program_redirect_uri,
+                &bump_seed_nonce,
             )?;
 
             let relying_party_account_data = RelyingPartyData {
                 version: RelyingPartyData::CURRENT_VERSION,
                 authority: *authority_info.key,
-                related_program_data: RelatedProgramInfo{
+                related_program_data: RelatedProgramInfo {
                     name: program_name.clone(),
-                    icon_cid: icon_cid,
+                    icon_cid: icon_content_id,
                     domain_name: program_domain_name.clone(),
                     redirect_uri: program_redirect_uri.clone(),
                 },
             };
 
             // Fund the relying party with rent-exempt balance
-            let required_relying_party_lamports = rent.minimum_balance(get_instance_packed_len(&relying_party_account_data).unwrap());
+            let required_relying_party_lamports =
+                rent.minimum_balance(get_instance_packed_len(&relying_party_account_data).unwrap());
             if relying_party_info.lamports() < required_relying_party_lamports {
                 return Err(ProgramError::AccountNotRentExempt);
             }
@@ -140,7 +147,7 @@ pub fn process_instruction(
             // allocate space in vaccount
             invoke_signed(
                 &system_instruction::allocate(
-                    &relying_party_info.key,
+                    relying_party_info.key,
                     get_instance_packed_len(&relying_party_account_data).unwrap() as u64,
                 ),
                 &[relying_party_info.clone(), system_program_info.clone()],
@@ -149,15 +156,14 @@ pub fn process_instruction(
 
             // assign owner from system program to vaccount
             invoke_signed(
-                &system_instruction::assign(
-                    &relying_party_info.key,
-                    &program_id
-                ),
+                &system_instruction::assign(relying_party_info.key, program_id),
                 &[relying_party_info.clone(), system_program_info.clone()],
                 new_relying_party_signers,
             )?;
 
-            relying_party_account_data.serialize(&mut *relying_party_info.data.borrow_mut()).map_err(|e| e.into())
+            relying_party_account_data
+                .serialize(&mut *relying_party_info.data.borrow_mut())
+                .map_err(|e| e.into())
         }
 
         RelyingPartyInstruction::SetAuthority => {
@@ -166,12 +172,13 @@ pub fn process_instruction(
             let authority_info = next_account_info(account_info_iter)?;
             let new_authority_info = next_account_info(account_info_iter)?;
 
-            let mut relying_party_data = RelyingPartyData::try_from_slice(&relying_party_info.data.borrow())?;
+            let mut relying_party_data =
+                RelyingPartyData::try_from_slice(&relying_party_info.data.borrow())?;
             if !relying_party_data.is_initialized() {
                 msg!("RelyingParty account not initialized");
                 return Err(ProgramError::UninitializedAccount);
             }
-    
+
             check_authority(authority_info, &relying_party_data.authority)?;
 
             relying_party_data.authority = *new_authority_info.key;
@@ -186,7 +193,8 @@ pub fn process_instruction(
             let authority_info = next_account_info(account_info_iter)?;
             let destination_info = next_account_info(account_info_iter)?;
 
-            let relying_party_data = RelyingPartyData::try_from_slice(&relying_party_info.data.borrow())?;
+            let relying_party_data =
+                RelyingPartyData::try_from_slice(&relying_party_info.data.borrow())?;
             if !relying_party_data.is_initialized() {
                 msg!("RelyingParty not initialized");
                 return Err(ProgramError::UninitializedAccount);

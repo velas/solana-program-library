@@ -1,7 +1,7 @@
 //! Program instructions
 
 use crate::id;
-use borsh::{BorshDeserialize, BorshSerialize, BorshSchema};
+use borsh::{BorshDeserialize, BorshSchema, BorshSerialize};
 use solana_program::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
@@ -12,7 +12,7 @@ use solana_program::{
 #[derive(Clone, Debug, PartialEq, BorshDeserialize, BorshSerialize, BorshSchema)]
 pub enum RelyingPartyInstruction {
     /// Create a new relying party account
-    /// RelyingPartyProgram contain meta inforamation about some dapp that needed for VaccountProgram. 
+    /// RelyingPartyProgram contain meta inforamation about some dapp that needed for VaccountProgram.
     ///
     /// Accounts expected by this instruction:
     ///
@@ -21,15 +21,20 @@ pub enum RelyingPartyInstruction {
     /// 2. `[]` Related program to the RelyingParty
     Initialize {
         /// Dapp name to show in Vaccount
+        #[allow(dead_code)] // but it's not
         program_name: String,
         /// Dapp icon content identifier
+        #[allow(dead_code)] // but it's not
         program_icon_cid: String,
         /// Domain name of the Dapp
+        #[allow(dead_code)] // but it's not
         program_domain_name: String,
         /// Allowed redirect URI
+        #[allow(dead_code)] // but it's not
         program_redirect_uri: Vec<String>,
         /// Nonce with RelyingParty address was genereted
-        bump_seed_nonce: u8
+        #[allow(dead_code)] // but it's not
+        bump_seed_nonce: u8,
     },
 
     /// Update the authority of the provided RelyingParty account
@@ -53,8 +58,8 @@ pub enum RelyingPartyInstruction {
 
 /// Create a `RelyingPartyInstruction::Initialize` instruction
 pub fn initialize(
-    relying_party_account: &Pubkey, 
-    authority: &Pubkey, 
+    relying_party_account: &Pubkey,
+    authority: &Pubkey,
     program_name: String,
     program_icon_cid: String,
     program_domain_name: String,
@@ -63,12 +68,12 @@ pub fn initialize(
 ) -> Instruction {
     Instruction::new_with_borsh(
         id(),
-        &RelyingPartyInstruction::Initialize{ 
-            program_name, 
-            program_icon_cid, 
-            program_domain_name, 
-            program_redirect_uri, 
-            bump_seed_nonce 
+        &RelyingPartyInstruction::Initialize {
+            program_name,
+            program_icon_cid,
+            program_domain_name,
+            program_redirect_uri,
+            bump_seed_nonce,
         },
         vec![
             AccountMeta::new(*relying_party_account, false),
@@ -97,7 +102,11 @@ pub fn set_authority(
 }
 
 /// Create a `RelyingPartyInstruction::CloseAccount` instruction
-pub fn close_account(relying_party_account: &Pubkey, signer: &Pubkey, receiver: &Pubkey) -> Instruction {
+pub fn close_account(
+    relying_party_account: &Pubkey,
+    signer: &Pubkey,
+    receiver: &Pubkey,
+) -> Instruction {
     Instruction::new_with_borsh(
         id(),
         &RelyingPartyInstruction::CloseAccount,
@@ -116,7 +125,7 @@ mod tests {
 
     #[test]
     fn serialize_initialize() {
-        let instruction = RelyingPartyInstruction::Initialize{ 
+        let instruction = RelyingPartyInstruction::Initialize {
             program_name: String::from("test_program"),
             program_icon_cid: "QmdfTbBqBPQ7VNxZEYEj14VmRuZBkqFbiwReogJgS1zR1n".to_string(),
             program_domain_name: String::from("http://localhost:8989/"),
@@ -126,7 +135,16 @@ mod tests {
             ],
             bump_seed_nonce: 199,
         };
-        let expected = vec![0, 12, 0, 0, 0, 116, 101, 115, 116, 95, 112, 114, 111, 103, 114, 97, 109, 46, 0, 0, 0, 81, 109, 100, 102, 84, 98, 66, 113, 66, 80, 81, 55, 86, 78, 120, 90, 69, 89, 69, 106, 49, 52, 86, 109, 82, 117, 90, 66, 107, 113, 70, 98, 105, 119, 82, 101, 111, 103, 74, 103, 83, 49, 122, 82, 49, 110, 22, 0, 0, 0, 104, 116, 116, 112, 58, 47, 47, 108, 111, 99, 97, 108, 104, 111, 115, 116, 58, 56, 57, 56, 57, 47, 2, 0, 0, 0, 20, 0, 0, 0, 104, 116, 116, 112, 115, 58, 47, 47, 118, 101, 108, 97, 115, 46, 99, 111, 109, 47, 114, 117, 25, 0, 0, 0, 104, 116, 116, 112, 115, 58, 47, 47, 119, 97, 108, 108, 101, 116, 46, 118, 101, 108, 97, 115, 46, 99, 111, 109, 47, 199];
+        let expected = vec![
+            0, 12, 0, 0, 0, 116, 101, 115, 116, 95, 112, 114, 111, 103, 114, 97, 109, 46, 0, 0, 0,
+            81, 109, 100, 102, 84, 98, 66, 113, 66, 80, 81, 55, 86, 78, 120, 90, 69, 89, 69, 106,
+            49, 52, 86, 109, 82, 117, 90, 66, 107, 113, 70, 98, 105, 119, 82, 101, 111, 103, 74,
+            103, 83, 49, 122, 82, 49, 110, 22, 0, 0, 0, 104, 116, 116, 112, 58, 47, 47, 108, 111,
+            99, 97, 108, 104, 111, 115, 116, 58, 56, 57, 56, 57, 47, 2, 0, 0, 0, 20, 0, 0, 0, 104,
+            116, 116, 112, 115, 58, 47, 47, 118, 101, 108, 97, 115, 46, 99, 111, 109, 47, 114, 117,
+            25, 0, 0, 0, 104, 116, 116, 112, 115, 58, 47, 47, 119, 97, 108, 108, 101, 116, 46, 118,
+            101, 108, 97, 115, 46, 99, 111, 109, 47, 199,
+        ];
         assert_eq!(instruction.try_to_vec().unwrap(), expected);
         assert_eq!(
             RelyingPartyInstruction::try_from_slice(&expected).unwrap(),
