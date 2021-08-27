@@ -47,7 +47,7 @@ sudo apt install build-essential libcurl4-gnutls-dev libxml2-dev libssl-dev libu
 Install the package from the [crates](https://crates.io/crates/libc) through `cargo`:
 
 ```bash
-$ cargo install vpl-relying-party-cli
+$ cargo install vpl-relying-party-cli --git https://github.com/velas/velas-program-library
 ```
 
 ## Usage
