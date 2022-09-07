@@ -1,0 +1,31 @@
+{
+  "name": "@solana/spl-relying-party",
+  "version": "0.1.0",
+  "description": "SPL Relying Party Program JS API",
+  "scripts": {
+    "lint": "npx prettier src/*.ts -w",
+    "main": "ts-node-esm src/index.ts",
+    "build": "tsc",
+    "test": "./node_modules/mocha/bin/mocha -p ./dist"
+  },
+  "keywords": [],
+  "author": "Vlad Pavlichek",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/mocha": "^8.2.2",
+    "@types/node": "^18.7.15",
+    "mocha": "^8.4.0",
+    "prettier": "^2.2.1",
+    "typescript": "^4.8.2"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.18.0",
+    "@tsconfig/recommended": "^1.0.1",
+    "assert": "^2.0.0",
+    "borsh": "^0.4.0",
+    "buffer": "^6.0.1",
+    "process": "^0.11.10",
+    "ts-node": "^10.9.1"
+  },
+  "type": "module"
+}
